@@ -8,7 +8,11 @@ on:
         required: true
         type: string
       publish:
-        description: Publish the verified artifacts to npm and GitHub Releases
+        description: Publish the verified packages to GitHub Packages
+        default: false
+        type: boolean
+      github_release:
+        description: Also create the GitHub Release and version tag after verifying the public packages
         default: false
         type: boolean
 
@@ -34,8 +38,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           PUBLISH: ${{ inputs.publish }}
+          GITHUB_RELEASE: ${{ inputs.github_release }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_RELEASE" = true ] && [ "$PUBLISH" != true ]; then
+            echo "Creating a GitHub Release requires package publication." >&2
+            exit 1
+          fi
           test "$VERSION" = "$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$GITHUB_SHA"
@@ -113,7 +122,7 @@ jobs:
     environment: release-main
     permissions:
       contents: read
-      id-token: write
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,7 +130,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-          registry-url: https://registry.npmjs.org
+          registry-url: https://npm.pkg.github.com
+          scope: '@pixel-brewery'
           package-manager-cache: false
       - name: Install the pinned compiler
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -130,8 +140,9 @@ jobs:
           artifact-ids: ${{ needs.validate.outputs.artifact-ids }}
           path: ${{ runner.temp }}/quivra
           merge-multiple: true
-      - name: Publish the verified package set using npm Trusted Publishing
+      - name: Publish the verified tarballs to GitHub Packages
         env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           ARTIFACTS: ${{ runner.temp }}/quivra
@@ -146,9 +157,39 @@ jobs:
           fi
           node distribution/verify-release.ts "$VERSION" "$ARTIFACTS" --publish-npm
 
-  release:
+  verify-public:
     if: inputs.publish
     needs: [validate, publish-npm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Install the pinned compiler
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.validate.outputs.artifact-ids }}
+          path: ${{ runner.temp }}/quivra
+          merge-multiple: true
+      - name: Verify all versions are public and linked to Quivra
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          ARTIFACTS: ${{ runner.temp }}/quivra
+        run: node distribution/verify-release.ts "$VERSION" "$ARTIFACTS" --verify-public
+
+  release:
+    if: inputs.publish && inputs.github_release
+    needs: [validate, verify-public]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -159,7 +200,7 @@ jobs:
           artifact-ids: ${{ needs.validate.outputs.artifact-ids }}
           path: ${{ runner.temp }}/quivra
           merge-multiple: true
-      - name: Publish GitHub Release after npm succeeds
+      - name: Publish GitHub Release after package verification succeeds
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}

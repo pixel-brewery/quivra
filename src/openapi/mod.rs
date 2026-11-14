@@ -13,6 +13,7 @@ use serde_json::Value;
 pub struct Api {
     pub info: Info,
     pub components: Components,
+    pub tags: BTreeMap<String, Option<String>>,
     paths: BTreeMap<String, PathItem>,
     security: SecurityRequirements,
 }
@@ -101,6 +102,11 @@ struct PathItem {
 pub struct Operation {
     pub operation_id: String,
     pub summary: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub deprecated: bool,
     #[serde(default)]
     parameters: Vec<Parameter>,
     pub request_body: Option<RequestBody>,
@@ -114,6 +120,9 @@ pub struct Operation {
 #[serde(rename_all = "camelCase")]
 pub struct Parameter {
     pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub deprecated: bool,
     #[serde(rename = "in")]
     pub location: String,
     #[serde(default)]
@@ -133,6 +142,7 @@ pub struct RequestBody {
 
 #[derive(Clone, Deserialize)]
 pub struct Response {
+    pub description: Option<String>,
     #[serde(default)]
     pub content: BTreeMap<String, Media>,
 }
@@ -186,8 +196,7 @@ impl Api {
                     && !path.chars().any(char::is_control),
                 "unsupported API path {path:?}"
             );
-            let inherited_parameters = collect_parameters(&item.parameters)
-                .with_context(|| format!("{path} parameters"))?;
+            validate_parameters(&item.parameters).with_context(|| format!("{path} parameters"))?;
             for (method, value) in &item.methods {
                 if !is_method(method) {
                     continue;
@@ -215,16 +224,24 @@ impl Api {
                         "{label}: unknown security scheme {scheme:?}"
                     );
                 }
-                let mut parameters = inherited_parameters.clone();
-                parameters.extend(
-                    collect_parameters(&operation.parameters).with_context(|| label.clone())?,
-                );
+                validate_parameters(&operation.parameters).with_context(|| label.clone())?;
+                let mut parameters = item.parameters.clone();
+                for parameter in &operation.parameters {
+                    if let Some(inherited) = parameters.iter_mut().find(|inherited| {
+                        inherited.location == parameter.location
+                            && parameter_name(inherited) == parameter_name(parameter)
+                    }) {
+                        *inherited = parameter.clone();
+                    } else {
+                        parameters.push(parameter.clone());
+                    }
+                }
                 endpoints.push(Endpoint {
                     method,
                     path,
                     operation,
                     security,
-                    parameters: parameters.into_values().collect(),
+                    parameters,
                 });
             }
         }
@@ -234,27 +251,30 @@ impl Api {
     }
 }
 
-fn collect_parameters(parameters: &[Parameter]) -> Result<BTreeMap<(String, String), Parameter>> {
-    let mut unique = BTreeMap::new();
+fn validate_parameters(parameters: &[Parameter]) -> Result<()> {
+    let mut unique = BTreeSet::new();
     for parameter in parameters {
         ensure!(
             !parameter.name.is_empty(),
             "parameter name must not be empty"
         );
-        let comparison_name = if parameter.location == "header" {
-            parameter.name.to_ascii_lowercase()
-        } else {
-            parameter.name.clone()
-        };
-        let key = (parameter.location.clone(), comparison_name);
+        let key = (parameter.location.as_str(), parameter_name(parameter));
         ensure!(
-            unique.insert(key, parameter.clone()).is_none(),
+            unique.insert(key),
             "duplicate {} parameter {:?}",
             parameter.location,
             parameter.name
         );
     }
-    Ok(unique)
+    Ok(())
+}
+
+fn parameter_name(parameter: &Parameter) -> String {
+    if parameter.location == "header" {
+        parameter.name.to_ascii_lowercase()
+    } else {
+        parameter.name.clone()
+    }
 }
 
 fn is_method(method: &str) -> bool {

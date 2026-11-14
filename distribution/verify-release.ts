@@ -11,7 +11,14 @@ import { platforms } from "./platforms.ts";
 import { compileLauncher } from "./compileLauncher.ts";
 import { readLauncherManifest } from "./readLauncherManifest.ts";
 
-const publicRegistry = "https://registry.npmjs.org/";
+const packageRegistry = "https://npm.pkg.github.com";
+const githubApi = "https://api.github.com";
+const organization = "pixel-brewery";
+const canonicalRepository = `${organization}/quivra`;
+const repositoryId = 1457527723;
+const metadataBudget = 4 * 1024 * 1024;
+const archiveBudget = 64 * 1024 * 1024;
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
 const cargoVersionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 const distribution = fileURLToPath(new URL(".", import.meta.url));
 const maxTarOutput = 64 * 1024 * 1024;
@@ -122,7 +129,7 @@ export async function verifyArtifactSet(version: string, directory: string): Pro
     const launcher = await readLauncherManifest();
     assert.equal(launcher.name, "@pixel-brewery/quivra");
     assert.equal(launcher.repository.url, "git+https://github.com/pixel-brewery/quivra.git");
-    assert.deepEqual(launcher.publishConfig, { registry: publicRegistry, access: "public" });
+    assert.deepEqual(launcher.publishConfig, { registry: packageRegistry, access: "public" });
     assertNoNpmHooks(launcher);
     const license = await readFile(new URL("../LICENSE", import.meta.url));
 
@@ -191,51 +198,193 @@ export async function verifyArtifactSet(version: string, directory: string): Pro
     return packages;
 }
 
-async function registryIntegrity({ name, version }: IPackageArtifact, fetchMetadata = fetch): Promise<string | null> {
-    const versionUrl = new URL(`${encodeURIComponent(name)}/${version}`, publicRegistry);
-    const response = await fetchMetadata(versionUrl, {
-        headers: { accept: "application/json", "cache-control": "no-cache" },
+function record(value: unknown): Record<string, unknown> | undefined {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        return value as Record<string, unknown>;
+    }
+    return undefined;
+}
+
+async function readMetadata(response: Response): Promise<unknown> {
+    assert(response.body, "GitHub Packages returned an empty metadata response.");
+    assert(Number(response.headers.get("content-length")) <= metadataBudget,
+        "GitHub Packages metadata exceeds its byte budget.");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            length += value.byteLength;
+            assert(length <= metadataBudget, "GitHub Packages metadata exceeds its byte budget.");
+            chunks.push(value);
+        }
+    } finally {
+        await reader.cancel();
+        reader.releaseLock();
+    }
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, length)));
+}
+
+function packageSlug(name: string): string {
+    const prefix = `@${organization}/`;
+    assert(name.startsWith(prefix) && /^quivra(?:-[a-z0-9-]+)?$/u.test(name.slice(prefix.length)),
+        `Unexpected GitHub package name ${name}.`);
+    return name.slice(prefix.length);
+}
+
+function requestMetadata(url: string, token: string, fetchMetadata: typeof fetch): Promise<Response> {
+    const rest = new URL(url).origin === githubApi;
+    return fetchMetadata(url, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: rest ? "application/vnd.github+json" : "application/json",
+            "Cache-Control": "no-cache",
+            "User-Agent": "Quivra-release",
+            ...(rest ? { "X-GitHub-Api-Version": "2022-11-28" } : {}),
+        },
         redirect: "error",
         signal: AbortSignal.timeout(20_000),
     });
+}
+
+async function readRegistryVersion(
+    { name, version }: IPackageArtifact, token: string, fetchMetadata: typeof fetch,
+): Promise<{ integrity: string; tarball: string } | null> {
+    const slug = packageSlug(name);
+    const response = await requestMetadata(`${packageRegistry}/@${organization}%2f${slug}`, token, fetchMetadata);
     const label = `${name}@${version}`;
     if (response.status === 404) {
-        const body: unknown = await response.json();
-        const reason = typeof body === "string" ? body :
-            body && typeof body === "object" && "error" in body ? body.error : undefined;
-        assert(
-            reason === "Not Found" || reason === "not_found" || reason === `version not found: ${version}`,
-            `npm registry returned an unexpected absence response for ${label}.`,
-        );
+        const problem = record(await readMetadata(response));
+        assert.equal(problem?.error, `npm package "${slug}" does not exist under owner "${organization}"`,
+            `GitHub Packages returned an unexpected absence response for ${label}.`);
         return null;
     }
-    if (!response.ok) throw new Error(`npm registry returned HTTP ${response.status} for ${label}.`);
-    const published: unknown = await response.json();
-    assert(published && typeof published === "object" &&
-        "name" in published && published.name === name &&
-        "version" in published && published.version === version,
-        `npm registry returned unexpected package identity for ${label}.`);
-    assert("dist" in published && published.dist && typeof published.dist === "object" &&
-        "integrity" in published.dist && typeof published.dist.integrity === "string" &&
-        published.dist.integrity.length > 0,
-        `npm registry has no integrity for ${label}.`);
-    return published.dist.integrity;
+    assert(response.ok, `GitHub Packages returned HTTP ${response.status} for ${label}.`);
+    const packageInfo = record(await readMetadata(response));
+    const versions = record(packageInfo?.versions);
+    assert(packageInfo?.name === name && versions,
+        `GitHub Packages returned unexpected package metadata for ${label}.`);
+    if (!Object.hasOwn(versions, version)) return null;
+    const published = record(versions[version]);
+    assert(published?.name === name && published.version === version,
+        `GitHub Packages returned unexpected version identity for ${label}.`);
+    const dist = record(published.dist);
+    const integrity = dist?.integrity;
+    const tarball = dist?.tarball;
+    assert(typeof integrity === "string" && /^sha512-[A-Za-z0-9+/]{86}==$/u.test(integrity),
+        `GitHub Packages has no SHA-512 integrity for ${label}.`);
+    assert(typeof tarball === "string", `GitHub Packages has no archive URL for ${label}.`);
+    return { integrity, tarball };
+}
+
+function archiveUrl(value: string, base?: URL): URL {
+    const url = new URL(value, base);
+    assert(url.protocol === "https:" && ["npm.pkg.github.com", "pkg-npm.githubusercontent.com"].includes(url.hostname)
+        && !url.port && !url.username && !url.password && !url.hash,
+        "GitHub Packages redirected to an unexpected archive URL.");
+    return url;
+}
+
+async function downloadedIntegrity(
+    entry: IPackageArtifact, tarball: string, token: string, fetchMetadata: typeof fetch,
+): Promise<string> {
+    let url = archiveUrl(tarball);
+    assert(url.origin === packageRegistry && url.pathname.startsWith(`/download/${entry.name}/${entry.version}/`)
+        && !url.search, `GitHub Packages returned an unexpected archive path for ${entry.name}.`);
+    let sendToken = true;
+    const signal = AbortSignal.timeout(30_000);
+    let response: Response;
+    for (let redirects = 0; ; redirects++) {
+        response = await fetchMetadata(url, {
+            headers: {
+                Accept: "application/octet-stream",
+                ...(sendToken ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            redirect: "manual",
+            signal,
+        });
+        if (!redirectStatuses.has(response.status)) break;
+        const location = response.headers.get("location");
+        await response.body?.cancel();
+        assert(redirects < 3 && location && location.length <= 8192,
+            "GitHub Packages returned an unexpected archive redirect.");
+        const next = archiveUrl(location, url);
+        sendToken = sendToken && next.origin === url.origin;
+        url = next;
+    }
+    assert(response.ok && response.body && Number(response.headers.get("content-length")) <= archiveBudget,
+        `Could not download bounded GitHub Packages archive for ${entry.name} (HTTP ${response.status}).`);
+    const reader = response.body.getReader();
+    const digest = createHash("sha512");
+    let length = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            length += value.byteLength;
+            assert(length <= archiveBudget, "GitHub Packages archive exceeds its byte budget.");
+            digest.update(value);
+        }
+    } finally {
+        await reader.cancel();
+        reader.releaseLock();
+    }
+    return `sha512-${digest.digest("base64")}`;
+}
+
+export async function verifyPublicPackages(
+    packages: readonly IPackageArtifact[], token: string, fetchMetadata = fetch,
+): Promise<void> {
+    const privatePackages: string[] = [];
+    for (const entry of packages) {
+        const slug = packageSlug(entry.name);
+        const label = `${entry.name}@${entry.version}`;
+        const response = await requestMetadata(
+            `${githubApi}/orgs/${organization}/packages/npm/${slug}`, token, fetchMetadata,
+        );
+        assert(response.ok, `GitHub package access metadata returned HTTP ${response.status} for ${label}.`);
+        const packageInfo = record(await readMetadata(response));
+        const repository = record(packageInfo?.repository);
+        assert(
+            packageInfo?.name === slug && packageInfo.package_type === "npm" &&
+            record(packageInfo.owner)?.login === organization &&
+            repository?.id === repositoryId && repository.full_name === canonicalRepository &&
+            repository.private === false,
+            `GitHub package ${label} is not linked to the canonical Quivra repository.`,
+        );
+        const version = await readRegistryVersion(entry, token, fetchMetadata);
+        assert(version, `GitHub Packages has no published version for ${label}.`);
+        assert.equal(version.integrity, entry.integrity, `Published archive integrity differs for ${label}.`);
+        if (packageInfo.visibility !== "public") {
+            privatePackages.push(`https://github.com/orgs/${organization}/packages/npm/package/${slug}`);
+        } else {
+            assert.equal(await downloadedIntegrity(entry, version.tarball, token, fetchMetadata), entry.integrity,
+                `Downloaded archive bytes differ for ${label}.`);
+        }
+    }
+    assert(privatePackages.length === 0,
+        `Set these GitHub Packages to Public in their package settings, then re-run failed jobs on this release:\n${privatePackages.join("\n")}`);
+    console.log(`Verified ${packages.length} public GitHub packages connected to ${canonicalRepository}.`);
 }
 
 interface IPublishOptions {
+    token: string;
     publish: (file: string) => unknown;
     fetchMetadata?: typeof fetch;
     pause?: (milliseconds: number) => Promise<unknown>;
 }
 
 export async function publishCheckedPackages(packages: readonly IPackageArtifact[], {
+    token,
     publish,
     fetchMetadata = fetch,
     pause = delay,
 }: IPublishOptions): Promise<void> {
     assert.equal(typeof publish, "function", "A publication callback is required.");
     // Check the entire release first so a collision in a later package prevents earlier writes.
-    const published = await Promise.all(packages.map((entry) => registryIntegrity(entry, fetchMetadata)));
+    const published = await Promise.all(packages.map(async (entry) => (await readRegistryVersion(entry, token, fetchMetadata))?.integrity ?? null));
     for (const [index, entry] of packages.entries()) {
         if (published[index] !== null) {
             assert.equal(published[index], entry.integrity,
@@ -253,7 +402,7 @@ export async function publishCheckedPackages(packages: readonly IPackageArtifact
         assert.equal(actual, entry.integrity, `Verified tarball changed: ${entry.path}`);
         await publish(entry.path);
         for (let attempt = 0; attempt < 10; attempt++) {
-            const integrity = await registryIntegrity(entry, fetchMetadata);
+            const integrity = (await readRegistryVersion(entry, token, fetchMetadata))?.integrity ?? null;
             if (integrity !== null) {
                 assert.equal(integrity, entry.integrity, `npm published different tarball bytes for ${label}.`);
                 break;
@@ -264,32 +413,38 @@ export async function publishCheckedPackages(packages: readonly IPackageArtifact
     }
 }
 
-function requireReleaseWorkflow() {
+function requireReleaseWorkflow(): string {
+    const token = process.env.NODE_AUTH_TOKEN;
     assert(
         process.env.GITHUB_ACTIONS === "true"
             && process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
-            && process.env.GITHUB_REPOSITORY === "pixel-brewery/quivra"
-            && process.env.GITHUB_REPOSITORY_ID === "1457527723"
+            && process.env.GITHUB_REPOSITORY === canonicalRepository
+            && process.env.GITHUB_REPOSITORY_ID === String(repositoryId)
             && process.env.GITHUB_REF === "refs/heads/main"
-            && process.env.GITHUB_WORKFLOW_REF === "pixel-brewery/quivra/.github/workflows/release.yml@refs/heads/main"
-            && process.env.ACTIONS_ID_TOKEN_REQUEST_URL
-            && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
-        "npm publication requires Quivra's GitHub Actions release workflow and OIDC.",
+            && process.env.GITHUB_WORKFLOW_REF === `${canonicalRepository}/.github/workflows/release.yml@refs/heads/main`
+            && token,
+        "Package publication requires Quivra's GitHub Actions release workflow and its package token.",
     );
+    return token;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     const [version, directory, mode, ...extra] = process.argv.slice(2);
-    if (!version || !directory || (mode !== undefined && mode !== "--publish-npm") || extra.length > 0) {
-        throw new Error("Usage: node distribution/verify-release.ts VERSION ARTIFACTS [--publish-npm]");
+    if (!version || !directory || (mode !== undefined && mode !== "--publish-npm" && mode !== "--verify-public") || extra.length > 0) {
+        throw new Error("Usage: node distribution/verify-release.ts VERSION ARTIFACTS [--publish-npm | --verify-public]");
     }
-    if (mode === "--publish-npm") requireReleaseWorkflow();
+    const token = mode === "--publish-npm" ? requireReleaseWorkflow() : process.env.NODE_AUTH_TOKEN;
     const packages = await verifyArtifactSet(version, resolve(directory));
     if (mode === "--publish-npm") {
+        assert(token);
         await publishCheckedPackages(packages, {
+            token,
             publish: (file) => execFileSync("npm", [
-                "publish", file, "--ignore-scripts", "--access", "public", "--registry", publicRegistry,
+                "publish", file, "--ignore-scripts", "--registry", packageRegistry,
             ], { stdio: "inherit", timeout: 120_000 }),
         });
+    } else if (mode === "--verify-public") {
+        assert(token, "An existing GitHub Packages read token is required in NODE_AUTH_TOKEN.");
+        await verifyPublicPackages(packages, token);
     }
 }
