@@ -1,5 +1,7 @@
 # Quivra
 
+[![CI](https://github.com/pixel-brewery/quivra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pixel-brewery/quivra/actions/workflows/ci.yml)
+
 Generate TypeScript clients from OpenAPI with project-owned MiniJinja templates. The Rust CLI reads the API and prepares the template data. Your profile decides what code is generated and where it goes.
 
 This project is maintained by [Pixel Brewery](https://github.com/pixel-brewery).
@@ -41,6 +43,9 @@ Schema generation covers objects, arrays, maps, references, scalar literals, nul
 
 ## Install and develop
 
+The CLI is currently available from source and from verified GitHub Actions artifacts. The first public npm release is pending. Follow the [distribution guide](docs/distribution.md) to try the packaged CLI.
+
 - [Distribution](docs/distribution.md) covers GitHub release binaries, npm installation and the typed Node API.
 - [CI, releases and dependency updates](docs/ci-cd.md) covers checks, Dependabot and release preparation.
 - [Architecture and contributor checks](docs/architecture.md) explain where to make changes and how to verify them.
+- [Contributing](CONTRIBUTING.md) covers development and reporting bugs. Use the [security policy](SECURITY.md) to report vulnerabilities privately.

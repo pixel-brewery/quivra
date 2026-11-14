@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem with Quivra or a generated client.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This report will be public. Remove credentials, private URLs, and customer data from examples and logs.
+        Report vulnerabilities through [GitHub private vulnerability reporting](https://github.com/pixel-brewery/quivra/security/advisories/new).
+  - type: input
+    id: version
+    attributes:
+      label: Quivra version
+      description: Paste the output of `quivra --version`. Include the commit SHA if you built from source.
+      placeholder: quivra 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your operating system, architecture, and install method. For npm issues, add your Node.js and package-manager versions.
+      placeholder: macOS arm64, npm install, Node.js 26
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact commands and enough detail to run them from a clean directory.
+    validations:
+      required: true
+  - type: textarea
+    id: openapi
+    attributes:
+      label: Minimal OpenAPI document
+      description: If the document matters, paste sanitized YAML or JSON or link to a public, minimal reproducer.
+      render: yaml
+  - type: textarea
+    id: profile
+    attributes:
+      label: MiniJinja profile
+      description: Name the built-in profile or include the minimal sanitized profile.json and relevant templates when the problem depends on them.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant error output or a small generated code excerpt.
+    validations:
+      required: true
