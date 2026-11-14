@@ -248,7 +248,15 @@ fn combined_paths<'a>(first: &'a Digests, second: &'a Digests) -> BTreeSet<&'a s
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let hash = Sha256::digest(bytes);
+    let mut encoded = String::with_capacity(hash.len() * 2);
+    for byte in hash {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 fn metadata_bytes(value: &impl Serialize) -> Result<Vec<u8>> {
