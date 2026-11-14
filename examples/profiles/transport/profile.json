@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "files": {
+    "client.ts": "client.jinja",
+    "routes.ts": "routes.jinja"
+  },
+  "options": {
+    "className": "WidgetClient"
+  }
+}

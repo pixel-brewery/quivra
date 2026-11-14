@@ -1,0 +1,15 @@
+[package]
+name = "quivra"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Template-driven OpenAPI client generation"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+minijinja = { version = "2", features = ["loader"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+tempfile = "3"

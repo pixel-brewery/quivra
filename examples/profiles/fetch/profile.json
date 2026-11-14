@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "files": {
+    "client.ts": "client.jinja"
+  },
+  "options": {
+    "header": "Fetch functions"
+  }
+}

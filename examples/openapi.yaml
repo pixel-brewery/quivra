@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info:
+  title: Widget API
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      summary: List widgets
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: in-stock
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Matching widgets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Widget'
+    post:
+      operationId: createWidget
+      summary: Create a widget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWidget'
+      responses:
+        '201':
+          description: Created widget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+  /widgets/{widget-id}:
+    parameters:
+      - name: widget-id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getWidget
+      summary: Get a widget by ID
+      responses:
+        '200':
+          description: Matching widget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+    delete:
+      operationId: deleteWidget
+      summary: Delete a widget by ID
+      responses:
+        '204':
+          description: Widget deleted
+components:
+  schemas:
+    CreateWidget:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    Widget:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
