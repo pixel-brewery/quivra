@@ -9,5 +9,7 @@ export interface ITemplateModel {
     extensions: Record<string, JsonValue>;
     fields: ITemplateField[];
     type_alias: string | null;
+    enum_values: Array<{ name: string; value: string | number }>;
+    index_signature_type: string | null;
     imports: ITemplateModelImport[];
 }

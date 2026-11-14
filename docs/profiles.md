@@ -26,7 +26,11 @@ The `files` keys are relative paths below `--out`. Their values are template pat
 
 `typescript.interfacePrefix` prefixes interface names and references. `typescript.typeAliasPrefix` applies a prefix to PascalCase type alias names and references. With `modelFiles`, choose a template and output directory for object interfaces or type aliases. Each matched model is written to `<directory>/<name>.ts` and is available as `model` in that template.
 
-Set `typescript.ignoreUnusedModels` to emit the models referenced directly or transitively by operations. `typescript.excludeDeprecatedOperations` excludes deprecated operations and deprecated query parameters. `typescript.preserveNullableAnnotations` keeps an explicit OpenAPI 3.0 `nullable` annotation on a composed or enum schema, including when producers omit `null` in the enum values.
+Set `typescript.ignoreUnusedModels` to emit the models referenced directly or transitively by operations. `typescript.excludeDeprecatedOperations` excludes deprecated operations and deprecated query parameters. `typescript.preserveNullableAnnotations` keeps an explicit OpenAPI 3.0 `nullable` annotation on a reference, composed or enum schema, including when producers omit `null` in enum values.
+
+`typescript.enumObjects` exposes eligible named enums with their ordered `enum_values` and enables an `enum` rule in `modelFiles`. `typescript.objectIndexInterfaces` allows a plain object with additional properties to remain an interface and exposes its `index_signature_type`. `typescript.stripServiceTagSuffix` removes an exact suffix from the tag used to form the generated service name.
+
+`typescript.runtimeContracts` projects the validation schemas reachable from components marked `x-assistant-action: true`. The template receives `runtime_contracts.definitions`, the type-to-reference map `runtime_contracts.schemas`, and `runtime_contracts.actions`. Quivra checks the declared action payload fingerprint against the generated schema before rendering.
 
 Use `serviceFiles` to render one file per OpenAPI tag. For example, `"serviceFiles": [{ "directory": "services", "template": "service.jinja", "suffix": "ApiClient" }]` writes `services/WidgetsApiClient.ts` for the `widgets` tag. The template receives that entry as `service`, with a tag `name`, TypeScript `type_name`, optional `description`, and its `operations` and model `imports`.
 
@@ -52,14 +56,19 @@ A field contains its wire `name`, TypeScript `type`, and `optional`. Fields rema
 An operation contains:
 
 - `id`, `method`, `path`, and optional `summary`.
-- `raw_id`, `description`, `tags`, `deprecated`, and source-ordered `parameters` with the wire `location`.
+- `raw_id`, `description`, `tags`, `deprecated`, and source-ordered `parameters` with the wire `location`, a TypeScript `variable`, and `style`, `explode`, and `allow_reserved` serialization metadata.
 - `path_parameters` and `query_parameters` with the wire names, type expressions and optionality.
 - `body_type` and `body_optional`. A null body type means there is no request body.
 - `response_type`, the TypeScript union of the declared successful results.
-- `responses`, which preserves each declared success status as `status` (null for `2XX`), `kind` (`json`, `void`, or `sse`), TypeScript `type`, and nullable `media_type`. The current projection accepts one success media type per status.
+- `responses`, which preserves declared success statuses as `status` (null for `2XX`), `kind`, TypeScript `type`, and nullable `media_type`. The default projection accepts one JSON or SSE media type per status, as well as empty responses.
+- `all_responses`, with the status, description, media types, and `x-*` extensions of each response, including errors.
 - `accept`, the list of declared success media types as an HTTP header value, or null.
 - `extensions`, a JSON object with the operation’s `x-*` values.
 - `security`, a list of alternative groups. Every credential in a selected group is required. An empty group allows anonymous access. Each credential has a scheme `name`, `kind` (`bearer` or `apiKey`), `location` (`header` or `query`), and `wire_name`.
+
+Set `typescript.broadHttp` for a profile that implements additional HTTP serialization and decoding itself. This makes header parameters and non-scalar parameter schemas available and projects additional request and success media types, including multipart, text and binary content. The projected response kinds include `text` and `blob`. Values declared as `type: string, format: binary` project to `Blob` in media schemas.
+
+With this option, `variants` pairs each request media type with each media type of the first successful status. The template receives the method `name`, the nullable `request_body` with `media_type` and `type`, and the nullable `response` with its media, schema and status information. `success_status` is the first numeric success status, with `200` as the fallback. `path_expression` is a TypeScript template literal body that expects `params` and encodes each path parameter as a URL segment.
 
 ## Generating multiple documents
 

@@ -14,4 +14,9 @@ export interface ITemplateContext {
     services: ITemplateService[];
     uses_sse: boolean;
     options: Record<string, JsonValue>;
+    runtime_contracts: {
+        definitions: Record<string, JsonValue>;
+        schemas: Record<string, string>;
+        actions: Record<string, JsonValue>;
+    } | null;
 }

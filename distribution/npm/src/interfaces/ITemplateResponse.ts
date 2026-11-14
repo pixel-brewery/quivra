@@ -2,7 +2,7 @@ import type { ITemplateModelImport } from "./ITemplateModelImport.js";
 
 export interface ITemplateResponse {
     status: number | null;
-    kind: "json" | "void" | "sse";
+    kind: "json" | "void" | "sse" | "text" | "blob";
     type: string;
     media_type: string | null;
     wire_type: string | null;

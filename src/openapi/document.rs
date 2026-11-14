@@ -58,11 +58,12 @@ pub(super) fn load(path: &Path, reference_root: Option<&Path>) -> Result<Api> {
         .into_iter()
         .map(|tag| (tag.name, tag.description))
         .collect();
-    let component_keys = match document.pointer("/components/schemas") {
-        Some(Value::Object(schemas)) => schemas.keys().cloned().collect::<Vec<_>>(),
+    let original_schemas = match document.pointer("/components/schemas") {
+        Some(Value::Object(schemas)) => schemas.clone(),
         Some(_) => bail!("components.schemas must be an object"),
-        None => Vec::new(),
+        None => Map::new(),
     };
+    let component_keys = original_schemas.keys().cloned().collect::<Vec<_>>();
     ensure!(
         component_keys.len() <= MAX_SCHEMAS,
         "too many component schemas"
@@ -100,6 +101,8 @@ pub(super) fn load(path: &Path, reference_root: Option<&Path>) -> Result<Api> {
         tags,
         paths,
         security,
+        original_schemas,
+        openapi30: matches!(dialect, Dialect::OpenApi30),
     })
 }
 
@@ -312,7 +315,14 @@ impl Normalizer {
             }
             let name = self.schema_name(target)?;
             if matches!(self.dialect, Dialect::OpenApi30) {
+                let nullable = schema
+                    .get("nullable")
+                    .filter(|value| value.as_bool() == Some(true))
+                    .cloned();
                 schema.clear();
+                if let Some(nullable) = nullable {
+                    schema.insert("nullable".into(), nullable);
+                }
             }
             schema.insert(
                 "$ref".into(),

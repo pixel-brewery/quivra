@@ -16,6 +16,8 @@ pub struct Api {
     pub tags: BTreeMap<String, Option<String>>,
     paths: BTreeMap<String, PathItem>,
     security: SecurityRequirements,
+    pub original_schemas: serde_json::Map<String, Value>,
+    pub openapi30: bool,
 }
 
 #[derive(Deserialize)]
@@ -129,6 +131,7 @@ pub struct Parameter {
     pub required: bool,
     pub schema: Schema,
     pub style: Option<String>,
+    pub explode: Option<bool>,
     #[serde(default)]
     pub allow_reserved: bool,
 }
@@ -137,19 +140,37 @@ pub struct Parameter {
 pub struct RequestBody {
     #[serde(default)]
     pub required: bool,
-    pub content: BTreeMap<String, Media>,
+    #[serde(default, deserialize_with = "ordered_media")]
+    pub content: Vec<(String, Media)>,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct Response {
     pub description: Option<String>,
-    #[serde(default)]
-    pub content: BTreeMap<String, Media>,
+    #[serde(default, deserialize_with = "ordered_media")]
+    pub content: Vec<(String, Media)>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct Media {
     pub schema: Option<Schema>,
+}
+
+fn ordered_media<'de, D>(deserializer: D) -> Result<Vec<(String, Media)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let content = serde_json::Map::<String, Value>::deserialize(deserializer)?;
+    content
+        .into_iter()
+        .map(|(media_type, content)| {
+            serde_json::from_value(content)
+                .map(|media| (media_type, media))
+                .map_err(serde::de::Error::custom)
+        })
+        .collect()
 }
 
 #[derive(Clone, Deserialize)]
@@ -286,11 +307,7 @@ fn is_method(method: &str) -> bool {
 
 impl Operation {
     pub fn extensions(&self) -> BTreeMap<String, Value> {
-        self.extra
-            .iter()
-            .filter(|(key, _)| key.starts_with("x-"))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect()
+        extensions(&self.extra)
     }
 
     pub fn success_responses(&self) -> Vec<(&str, &Response)> {
@@ -302,14 +319,31 @@ impl Operation {
     }
 }
 
-pub fn json_schema(content: &BTreeMap<String, Media>) -> Result<&Schema> {
+impl Response {
+    pub fn extensions(&self) -> BTreeMap<String, Value> {
+        extensions(&self.extra)
+    }
+}
+
+fn extensions(extra: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+    extra
+        .iter()
+        .filter(|(key, _)| key.starts_with("x-"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+pub fn json_schema(content: &[(String, Media)]) -> Result<&Schema> {
     ensure!(
         content.len() == 1,
         "expected a single application/json media type"
     );
-    content
-        .get("application/json")
-        .context("only application/json is supported")?
+    let (media_type, media) = &content[0];
+    ensure!(
+        media_type == "application/json",
+        "only application/json is supported"
+    );
+    media
         .schema
         .as_ref()
         .context("application/json requires a schema")

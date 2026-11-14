@@ -14,6 +14,8 @@ pub(crate) struct Model {
     extensions: BTreeMap<String, Value>,
     fields: Vec<Field>,
     type_alias: Option<String>,
+    enum_values: Vec<EnumValue>,
+    index_signature_type: Option<String>,
     imports: BTreeSet<ModelImport>,
 }
 
@@ -25,6 +27,20 @@ impl Model {
     pub(crate) fn is_type_alias(&self) -> bool {
         self.type_alias.is_some()
     }
+
+    pub(crate) fn is_enum(&self) -> bool {
+        !self.enum_values.is_empty()
+    }
+
+    pub(super) fn raw_name(&self) -> &str {
+        &self.raw_name
+    }
+}
+
+#[derive(Serialize)]
+struct EnumValue {
+    name: String,
+    value: Value,
 }
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -64,10 +80,13 @@ pub(super) fn retain_used_models<'a>(
     models.retain(|model| used.contains(&model.name));
 }
 
+#[derive(Clone)]
 pub(super) struct SchemaTypes<'a> {
     schemas: &'a BTreeMap<String, Schema>,
     names: BTreeMap<&'a str, ModelImport>,
     preserve_nullable_annotations: bool,
+    enum_objects: bool,
+    multipart_binary: bool,
 }
 
 impl<'a> SchemaTypes<'a> {
@@ -77,17 +96,22 @@ impl<'a> SchemaTypes<'a> {
         alias_prefix: &str,
         event_type: &str,
         preserve_nullable_annotations: bool,
+        enum_objects: bool,
+        object_index_interfaces: bool,
     ) -> Result<Self> {
         reject_alias_cycles(schemas)?;
         let mut allocated = BTreeSet::new();
         let mut names = BTreeMap::new();
         for (raw, schema) in schemas {
             let mut name = super::identifier(raw);
-            let is_type_alias = !is_interface(schema);
+            let is_enum = enum_objects && named_enum(schema);
+            let is_interface =
+                is_interface(schema) || (object_index_interfaces && is_index_interface(schema));
+            let is_type_alias = !is_interface && !is_enum;
             if is_type_alias && !alias_prefix.is_empty() {
                 name = super::interface_name(alias_prefix, &super::type_name(raw));
             }
-            if !is_type_alias {
+            if is_interface {
                 name = super::interface_name(interface_prefix, &name);
             }
             ensure!(
@@ -110,6 +134,8 @@ impl<'a> SchemaTypes<'a> {
             schemas,
             names,
             preserve_nullable_annotations,
+            enum_objects,
+            multipart_binary: false,
         })
     }
 
@@ -184,11 +210,21 @@ impl<'a> SchemaTypes<'a> {
         validate_shape(schema)?;
         let declaration = &self.names[name];
         let mut imports = BTreeSet::new();
+        let enum_values = if self.enum_objects && named_enum(schema) {
+            enum_members(schema)?
+        } else {
+            Vec::new()
+        };
         let (fields, type_alias) = if declaration.is_type_alias {
             let expression = self.expression(schema, &mut imports)?;
             (Vec::new(), Some(expression))
         } else {
             (self.fields(schema, &mut imports)?, None)
+        };
+        let index_signature_type = if declaration.is_type_alias || !enum_values.is_empty() {
+            None
+        } else {
+            self.index_signature(schema, &fields, &mut imports)?
         };
         imports.remove(declaration);
         Ok(Model {
@@ -207,8 +243,22 @@ impl<'a> SchemaTypes<'a> {
                 .collect(),
             fields,
             type_alias,
+            enum_values,
+            index_signature_type,
             imports,
         })
+    }
+
+    pub fn expression_for_multipart(
+        &self,
+        schema: &Schema,
+        imports: &mut BTreeSet<ModelImport>,
+    ) -> Result<String> {
+        let types = Self {
+            multipart_binary: true,
+            ..self.clone()
+        };
+        types.expression(schema, imports)
     }
 
     pub fn expression(
@@ -294,6 +344,12 @@ impl<'a> SchemaTypes<'a> {
 
     fn base(&self, schema: &Schema, imports: &mut BTreeSet<ModelImport>) -> Result<Option<String>> {
         let expression = match schema.kind.as_deref() {
+            Some("string")
+                if self.multipart_binary
+                    && schema.other.get("format").and_then(Value::as_str) == Some("binary") =>
+            {
+                "Blob".into()
+            }
             Some("string") => "string".into(),
             Some("integer" | "number") => "number".into(),
             Some("boolean") => "boolean".into(),
@@ -323,6 +379,21 @@ impl<'a> SchemaTypes<'a> {
             entries.push(format!("{name}{optional}: {}", field.type_expression));
         }
 
+        if let Some(value_type) = self.index_signature(schema, &fields, imports)? {
+            entries.push(format!("[key: string]: {value_type}"));
+        }
+        if entries.is_empty() {
+            return Ok("object".into());
+        }
+        Ok(format!("{{ {} }}", entries.join("; ")))
+    }
+
+    fn index_signature(
+        &self,
+        schema: &Schema,
+        fields: &[Field],
+        imports: &mut BTreeSet<ModelImport>,
+    ) -> Result<Option<String>> {
         if let Some(value) = additional(schema) {
             let additional_type = match value {
                 Value::Bool(false) => None,
@@ -339,14 +410,10 @@ impl<'a> SchemaTypes<'a> {
                 if fields.iter().any(|field| field.optional) {
                     values.insert("undefined".into());
                 }
-                let value_type = values.into_iter().collect::<Vec<_>>().join(" | ");
-                entries.push(format!("[key: string]: {value_type}"));
+                return Ok(Some(values.into_iter().collect::<Vec<_>>().join(" | ")));
             }
         }
-        if entries.is_empty() {
-            return Ok("object".into());
-        }
-        Ok(format!("{{ {} }}", entries.join("; ")))
+        Ok(None)
     }
 
     fn fields(&self, schema: &Schema, imports: &mut BTreeSet<ModelImport>) -> Result<Vec<Field>> {
@@ -458,6 +525,11 @@ fn validate_shape(schema: &Schema) -> Result<()> {
 }
 
 fn is_interface(schema: &Schema) -> bool {
+    is_index_interface(schema)
+        && additional(schema).is_none_or(|value| *value == Value::Bool(false))
+}
+
+fn is_index_interface(schema: &Schema) -> bool {
     is_object(schema)
         && !schema.nullable
         && schema.reference.is_none()
@@ -465,7 +537,70 @@ fn is_interface(schema: &Schema) -> bool {
         && ["const", "allOf", "anyOf", "oneOf"]
             .iter()
             .all(|key| !schema.other.contains_key(*key))
-        && additional(schema).is_none_or(|value| *value == Value::Bool(false))
+}
+
+fn named_enum(schema: &Schema) -> bool {
+    !schema.values.is_empty()
+        && !schema.nullable
+        && matches!(
+            schema.kind.as_deref(),
+            Some("string" | "integer" | "number")
+        )
+        && schema
+            .values
+            .iter()
+            .all(|value| value.is_string() || value.is_number())
+}
+
+fn enum_members(schema: &Schema) -> Result<Vec<EnumValue>> {
+    let explicit_names = ["x-enum-varnames", "x-enum-names", "x-extensible-enum"]
+        .iter()
+        .find_map(|key| schema.other.get(*key).and_then(Value::as_array));
+    let mut allocated = BTreeSet::new();
+    let mut members = Vec::new();
+    for (index, value) in schema.values.iter().enumerate() {
+        let text = value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        let mut name = explicit_names
+            .and_then(|names| names.get(index))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| enum_member_name(&text));
+        let base = name.clone();
+        let mut suffix = 2;
+        while !allocated.insert(name.clone()) {
+            name = format!("{base}_{suffix}");
+            suffix += 1;
+        }
+        ensure!(!name.is_empty(), "empty enum member name");
+        let value = if schema.kind.as_deref() == Some("string") {
+            Value::String(text)
+        } else {
+            value.clone()
+        };
+        members.push(EnumValue { name, value });
+    }
+    Ok(members)
+}
+
+fn enum_member_name(value: &str) -> String {
+    let mut name = String::new();
+    for part in value
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+    {
+        name.push(char::from(part.as_bytes()[0]).to_ascii_uppercase());
+        name.push_str(&part[1..]);
+    }
+    if name.is_empty() {
+        return "Empty".into();
+    }
+    if name.as_bytes()[0].is_ascii_digit() {
+        name.insert(0, '_');
+    }
+    name
 }
 
 fn is_object(schema: &Schema) -> bool {
@@ -513,7 +648,8 @@ mod tests {
                 })),
             ),
         ]);
-        let types = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false).unwrap();
+        let types =
+            SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false, false, false).unwrap();
         let models = types.models().unwrap();
         assert_eq!(models[0].name, "IEvent_Payload");
         assert!(models[0].imports.is_empty());
@@ -535,10 +671,11 @@ mod tests {
     #[test]
     fn keeps_existing_interface_prefixes_and_rejects_projected_name_collisions() {
         let mut schemas = BTreeMap::from([("IWidget".into(), schema(json!({"type":"object"})))]);
-        let types = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false).unwrap();
+        let types =
+            SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false, false, false).unwrap();
         assert_eq!(types.models().unwrap()[0].name(), "IWidget");
         schemas.insert("Widget".into(), schema(json!({"type":"object"})));
-        let error = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false)
+        let error = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false, false, false)
             .err()
             .unwrap();
         assert!(error.to_string().contains("schema name collision"));
@@ -553,7 +690,8 @@ mod tests {
                 "properties":{"name":{"type":"string"}}
             })),
         )]);
-        let types = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", true).unwrap();
+        let types =
+            SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", true, false, false).unwrap();
         let composed = schema(json!({
             "type":"object", "nullable":true, "allOf":[{"$ref":"#/components/schemas/Target"}]
         }));
@@ -580,7 +718,7 @@ mod tests {
             })),
         )]);
         assert!(
-            SchemaTypes::new(&schemas, "", "", "QuivraEvent", false)
+            SchemaTypes::new(&schemas, "", "", "QuivraEvent", false, false, false)
                 .unwrap()
                 .models()
                 .is_ok()
@@ -591,7 +729,7 @@ mod tests {
                 "allOf":[{"$ref":"#/components/schemas/Node"}]
             })),
         );
-        let error = SchemaTypes::new(&schemas, "", "", "QuivraEvent", false)
+        let error = SchemaTypes::new(&schemas, "", "", "QuivraEvent", false, false, false)
             .err()
             .unwrap();
         assert!(error.to_string().contains("unguarded recursive type alias"));

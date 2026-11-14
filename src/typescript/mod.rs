@@ -1,4 +1,5 @@
 mod operations;
+mod runtime_contracts;
 mod schemas;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,6 +22,11 @@ pub(crate) struct ProjectionOptions {
     pub ignore_unused_models: bool,
     pub exclude_deprecated_operations: bool,
     pub preserve_nullable_annotations: bool,
+    pub broad_http: bool,
+    pub enum_objects: bool,
+    pub object_index_interfaces: bool,
+    pub strip_service_tag_suffix: String,
+    pub runtime_contracts: bool,
 }
 
 #[derive(Serialize)]
@@ -33,6 +39,7 @@ pub struct ContextData<'a> {
     services: Vec<Service<'a>>,
     uses_sse: bool,
     options: &'a BTreeMap<String, Value>,
+    runtime_contracts: Option<runtime_contracts::RuntimeContracts>,
 }
 
 #[derive(Serialize)]
@@ -91,13 +98,29 @@ pub fn context<'a>(
         alias_prefix,
         &event_type,
         projection.preserve_nullable_annotations,
+        projection.enum_objects,
+        projection.object_index_interfaces,
     )?;
     let mut models = types.models()?;
+    let runtime_contracts = if projection.runtime_contracts {
+        let names: BTreeMap<_, _> = models
+            .iter()
+            .map(|model| (model.raw_name(), model.name()))
+            .collect();
+        Some(runtime_contracts::project(
+            &api.original_schemas,
+            api.openapi30,
+            |name| names.get(name).map(|name| (*name).to_owned()),
+        )?)
+    } else {
+        None
+    };
     let operations: Vec<_> = operations::build(
         api,
         &types,
         &event_type,
         projection.exclude_deprecated_operations,
+        projection.broad_http,
     )?
     .into_iter()
     .map(Rc::new)
@@ -133,7 +156,10 @@ pub fn context<'a>(
                 .collect();
             Service {
                 name: tag.into(),
-                type_name: type_name(tag),
+                type_name: type_name(
+                    tag.strip_suffix(&projection.strip_service_tag_suffix)
+                        .unwrap_or(tag),
+                ),
                 description: api.tags.get(tag).cloned().flatten(),
                 operations,
                 imports,
@@ -151,6 +177,7 @@ pub fn context<'a>(
         services,
         uses_sse,
         options,
+        runtime_contracts,
     })
 }
 
