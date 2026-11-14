@@ -127,7 +127,8 @@ content:
     assert!(widget.properties["label"].nullable);
     assert_eq!(widget.properties["label"].kind.as_deref(), Some("string"));
     assert_eq!(
-        successes[0].1.content["application/json"]
+        successes[0].1.content[0]
+            .1
             .schema
             .as_ref()
             .unwrap()
@@ -136,7 +137,7 @@ content:
         Some(reference)
     );
     assert!(successes[1].1.content.is_empty());
-    assert!(successes[2].1.content["text/event-stream"].schema.is_none());
+    assert!(successes[2].1.content[0].1.schema.is_none());
 }
 
 #[test]

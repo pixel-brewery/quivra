@@ -63,6 +63,7 @@ struct ModelFiles {
 enum ModelKind {
     Interface,
     Type,
+    Enum,
 }
 
 pub enum Starter {
@@ -260,7 +261,9 @@ impl Profile {
             .collect::<BTreeMap<_, _>>();
 
         for model in context.models() {
-            let kind = if model.is_type_alias() {
+            let kind = if model.is_enum() {
+                ModelKind::Enum
+            } else if model.is_type_alias() {
                 ModelKind::Type
             } else {
                 ModelKind::Interface
