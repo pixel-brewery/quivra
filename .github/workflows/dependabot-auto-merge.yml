@@ -1,0 +1,49 @@
+name: Merge verified Dependabot updates
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  merge:
+    if: >-
+      ${{ github.repository_id == '1457527723' &&
+          github.repository == 'pixel-brewery/quivra' &&
+          github.event.repository.private == false &&
+          github.event.repository.default_branch == 'main' &&
+          vars.QUIVRA_DEPENDABOT_AUTO_MERGE == 'true' &&
+          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.actor.id == 49699333 &&
+          github.event.workflow_run.head_repository.id == 1457527723 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: dependabot-merge-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: read
+    steps:
+      # This privileged job checks out main. It does not load pull request code or artifacts.
+      - name: Check out trusted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Squash merge the verified Dependabot head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUIVRA_DEPENDABOT_AUTO_MERGE: ${{ vars.QUIVRA_DEPENDABOT_AUTO_MERGE }}
+        run: node .github/scripts/mergeDependabotPullRequest.mjs

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "files": {
+    "client.ts": "75b83f86b32d84b3579bfc7d708de4b0384638688bd64815db28838a2ecde658",
+    "interfaces/ICreateWidget.ts": "2283d9158f20f8ef3e06a2492f6d0f33cafeb20607eeb7d25c09c5b1d0fb1367",
+    "interfaces/IQueuedWidget.ts": "0406f5f8a1c9286948b0b0dbda38f86b3c9dfdf004e4e0717cabc36a1bc5de57",
+    "interfaces/IQuivraEvent.ts": "dd5905804b1c9e13b4d42cc4c42c09c5c053eb6e7974ba004f6283e9f31ff7bd",
+    "interfaces/ITransport.ts": "530af7e486c3bf1ab395aee33dc949a2a953bdef95772564179b586d8658a364",
+    "interfaces/ITransportRequest.ts": "c284a72bb2ce4871cbff781b4139ca87477b812768e4ccc3d61c4fa7f1a8c4bb",
+    "interfaces/ITransportResponse.ts": "3a93dfbff47df1acd031aefb9bd6bb33aa874c517df465034d98e32d2153a29b",
+    "interfaces/IWidget.ts": "5e7604d4062ab5ab9e8c37233b387b38a2858c0fc4f93a1abfd326a99daeaccc",
+    "routes.ts": "ca4d00d222c8b0f0aa92ab340a1af78b002c07d89b504da323c2985ac40faae8",
+    "types/WidgetLabel.ts": "7aadcef4c2827dbfd55f8ab6c99d79e2f32bd3135ada1492b246af953f25daa7"
+  }
+}

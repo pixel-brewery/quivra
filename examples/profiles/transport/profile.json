@@ -2,9 +2,28 @@
   "version": 1,
   "files": {
     "client.ts": "client.jinja",
-    "routes.ts": "routes.jinja"
+    "routes.ts": "routes.jinja",
+    "interfaces/IQuivraEvent.ts": "interfaces/IQuivraEvent.jinja",
+    "interfaces/ITransport.ts": "interfaces/ITransport.jinja",
+    "interfaces/ITransportRequest.ts": "interfaces/ITransportRequest.jinja",
+    "interfaces/ITransportResponse.ts": "interfaces/ITransportResponse.jinja"
   },
   "options": {
     "className": "WidgetClient"
-  }
+  },
+  "typescript": {
+    "interfacePrefix": "I"
+  },
+  "modelFiles": [
+    {
+      "kind": "interface",
+      "directory": "interfaces",
+      "template": "interfaces/model.jinja"
+    },
+    {
+      "kind": "type",
+      "directory": "types",
+      "template": "types/model.jinja"
+    }
+  ]
 }

@@ -1,0 +1,72 @@
+export interface {{ event_type }} {
+    data: string;
+    event: string;
+    id: string;
+}
+
+async function* $quivraEvents(response: globalThis.Response): globalThis.AsyncGenerator<{{ event_type }}> {
+    const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (mediaType !== "text/event-stream" || !response.body) {
+        throw new globalThis.Error("Expected a text/event-stream response");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new globalThis.TextDecoder();
+    let line = "";
+    let previousCr = false;
+    let data: string[] = [];
+    let event = "";
+    let id = "";
+    let finished = false;
+
+    function consumeLine(input: string): {{ event_type }} | undefined {
+        if (input === "") {
+            const result = data.length ? { data: data.join("\n"), event: event || "message", id } : undefined;
+            data = [];
+            event = "";
+            return result;
+        }
+
+        const delimiter = input.indexOf(":");
+        const field = delimiter < 0 ? input : input.slice(0, delimiter);
+        let value = delimiter < 0 ? "" : input.slice(delimiter + 1);
+        if (value.startsWith(" ")) value = value.slice(1);
+        switch (field) {
+            case "data": data.push(value); break;
+            case "event": event = value; break;
+            case "id": if (!value.includes("\0")) id = value; break;
+        }
+    }
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            const text = decoder.decode(value, { stream: !done });
+            for (const character of text) {
+                if (character === "\n" && previousCr) {
+                    previousCr = false;
+                    continue;
+                }
+
+                previousCr = character === "\r";
+                if (previousCr || character === "\n") {
+                    const result = consumeLine(line);
+                    line = "";
+                    if (result) yield result;
+                } else {
+                    line += character;
+                }
+            }
+            if (done) {
+                finished = true;
+                break;
+            }
+        }
+    } finally {
+        try {
+            if (!finished) await reader.cancel();
+        } finally {
+            reader.releaseLock();
+        }
+    }
+}

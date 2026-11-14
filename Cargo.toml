@@ -2,14 +2,17 @@
 name = "quivra"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.99"
 publish = false
 description = "Template-driven OpenAPI client generation"
+repository = "https://github.com/pixel-brewery/quivra"
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-minijinja = { version = "2", features = ["loader"] }
+minijinja = { version = "2", features = ["fuel", "loader"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
+sha2 = "0.10"
 tempfile = "3"

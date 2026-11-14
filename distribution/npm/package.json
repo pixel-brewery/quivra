@@ -1,0 +1,33 @@
+{
+  "name": "@pixel-brewery/quivra",
+  "private": true,
+  "description": "Template-driven OpenAPI client generation",
+  "type": "module",
+  "bin": {
+    "quivra": "./bin/quivra.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    }
+  },
+  "types": "./src/index.d.ts",
+  "files": ["bin", "src"],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pixel-brewery/quivra.git",
+    "directory": "distribution/npm"
+  },
+  "homepage": "https://github.com/pixel-brewery/quivra",
+  "bugs": {
+    "url": "https://github.com/pixel-brewery/quivra/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Widget API
   version: 1.0.0
@@ -28,6 +28,10 @@ paths:
     post:
       operationId: createWidget
       summary: Create a widget
+      security:
+        - bearer: []
+        - tenantKey: []
+          queryKey: []
       requestBody:
         required: true
         content:
@@ -41,6 +45,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Widget'
+        '202':
+          description: Queued for creation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedWidget'
+  /widgets/events:
+    get:
+      operationId: streamWidgets
+      summary: Watch widget activity
+      x-profile-category: live
+      responses:
+        '200':
+          description: Widget activity
+          content:
+            text/event-stream: {}
   /widgets/{widget-id}:
     parameters:
       - name: widget-id
@@ -58,6 +78,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Widget'
+        '204':
+          description: Widget is not visible
     delete:
       operationId: deleteWidget
       summary: Delete a widget by ID
@@ -65,6 +87,18 @@ paths:
         '204':
           description: Widget deleted
 components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+    tenantKey:
+      type: apiKey
+      in: header
+      name: X-Tenant-Key
+    queryKey:
+      type: apiKey
+      in: query
+      name: access_key
   schemas:
     CreateWidget:
       type: object
@@ -73,7 +107,17 @@ components:
         name:
           type: string
         description:
+          type: [string, 'null']
+    QueuedWidget:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId:
           type: string
+        status:
+          const: queued
+    WidgetLabel:
+      type: string
     Widget:
       type: object
       required: [id, name]
@@ -81,6 +125,6 @@ components:
         id:
           type: string
         name:
-          type: string
+          $ref: '#/components/schemas/WidgetLabel'
         description:
-          type: string
+          type: [string, 'null']

@@ -5,6 +5,9 @@ export const routes = {
     [{{ operation.id | ts_string }}]: {
         method: {{ operation.method | ts_string }},
         path: {{ operation.path | ts_string }},
+{% if "x-profile-category" in operation.extensions -%}
+        category: {{ operation.extensions["x-profile-category"] | ts_string }},
+{% endif -%}
     },
 {% endfor -%}
 } as const;

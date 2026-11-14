@@ -2,11 +2,10 @@ mod openapi;
 mod profile;
 mod typescript;
 
-use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use anyhow::Result;
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -17,40 +16,80 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Generate a TypeScript client with a project-owned profile.
-    Generate {
-        /// OpenAPI 3.0 document in YAML or JSON.
-        spec: PathBuf,
-        /// Profile directory or path to profile.json.
-        #[arg(long)]
-        profile: PathBuf,
-        /// Directory to write generated files into.
+    /// Copy an editable starter profile into your project.
+    Init {
+        #[arg(long, value_enum, default_value_t = Preset::Fetch)]
+        preset: Preset,
+        /// Directory in which to create the profile.
         #[arg(long)]
         out: PathBuf,
     },
+    /// Generate a TypeScript client with a project-owned profile.
+    Generate {
+        #[command(flatten)]
+        input: Input,
+        /// Directory to write generated files into.
+        #[arg(long)]
+        out: PathBuf,
+        /// Compare generated files with disk instead of writing them.
+        #[arg(long)]
+        check: bool,
+    },
     /// Print the JSON context passed to every template.
     Inspect {
-        spec: PathBuf,
-        #[arg(long)]
-        profile: PathBuf,
+        #[command(flatten)]
+        input: Input,
     },
 }
 
+#[derive(Args)]
+struct Input {
+    /// OpenAPI 3.0 or 3.1 document in YAML or JSON.
+    spec: PathBuf,
+    /// Profile directory or path to its manifest.
+    #[arg(long)]
+    profile: PathBuf,
+    /// Root directory allowed for local OpenAPI references. Defaults to the spec's directory.
+    #[arg(long)]
+    reference_root: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Preset {
+    Fetch,
+    Transport,
+}
+
 fn main() -> Result<()> {
-    let (spec_path, profile_path, output) = match Cli::parse().command {
-        Command::Generate { spec, profile, out } => (spec, profile, Some(out)),
-        Command::Inspect { spec, profile } => (spec, profile, None),
-    };
-    let document =
-        fs::read_to_string(&spec_path).with_context(|| format!("read {}", spec_path.display()))?;
-    let api =
-        openapi::parse(&document).with_context(|| format!("parse {}", spec_path.display()))?;
-    let (manifest, templates) = profile::manifest_path(profile_path)?;
-    let profile = profile::Profile::load(&manifest)?;
-    let context = typescript::context(&api, &profile.options)?;
-    match output {
-        Some(output) => profile.render(&templates, &context)?.write(&output)?,
-        None => println!("{}", serde_json::to_string_pretty(&context)?),
+    match Cli::parse().command {
+        Command::Init { preset, out } => {
+            let preset = match preset {
+                Preset::Fetch => profile::Starter::Fetch,
+                Preset::Transport => profile::Starter::Transport,
+            };
+            preset.install(&out)?;
+        }
+        Command::Generate { input, out, check } => {
+            let api = openapi::load(&input.spec, input.reference_root.as_deref())?;
+            let profile = profile::Profile::load(&input.profile)?;
+            let context =
+                typescript::context(&api, &profile.options, &profile.typescript.interface_prefix)?;
+            let plan = profile.render(&context)?;
+            if check {
+                plan.check(&out)?;
+            } else {
+                for file in plan.write(&out)? {
+                    println!("{}", file.display());
+                }
+            }
+        }
+        Command::Inspect { input } => {
+            let api = openapi::load(&input.spec, input.reference_root.as_deref())?;
+            let profile = profile::Profile::load(&input.profile)?;
+            let context =
+                typescript::context(&api, &profile.options, &profile.typescript.interface_prefix)?;
+            println!("{}", serde_json::to_string_pretty(&context)?);
+        }
     }
     Ok(())
 }

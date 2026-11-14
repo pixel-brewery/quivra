@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quivra Architect"
+  short_description: "Guide Quivra CLI and client generation"
+  default_prompt: "Use $quivra-architect to work on the Quivra repository."

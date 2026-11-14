@@ -4,17 +4,22 @@ export const routes = {
 ["listWidgets"]: {
         method: "GET",
         path: "/widgets",
-    },
+},
 ["createWidget"]: {
         method: "POST",
         path: "/widgets",
-    },
+},
+["streamWidgets"]: {
+        method: "GET",
+        path: "/widgets/events",
+category: "live",
+},
 ["deleteWidget"]: {
         method: "DELETE",
         path: "/widgets/{widget-id}",
-    },
+},
 ["getWidget"]: {
         method: "GET",
         path: "/widgets/{widget-id}",
-    },
+},
 } as const;
