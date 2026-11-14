@@ -62,15 +62,15 @@ function readManifest(read: (member: string) => Buffer, expected: object, path: 
     assert.deepEqual(manifest, expected, `Unexpected package manifest in ${path}.`);
 }
 
-async function launcherEntries(): Promise<Map<string, Buffer>> {
+async function launcherEntries(license: Buffer): Promise<Map<string, Buffer>> {
     const staging = await mkdtemp(join(tmpdir(), "quivra-launcher-"));
     try {
         compileLauncher(staging);
         const files = await readdir(staging, { recursive: true, withFileTypes: true });
-        const entries = new Map([[
-            "package/README.md",
-            await readFile(join(distribution, "..", "docs", "distribution.md")),
-        ]]);
+        const entries = new Map([
+            ["package/README.md", await readFile(join(distribution, "..", "docs", "distribution.md"))],
+            ["package/LICENSE", license],
+        ]);
         for (const file of files) {
             if (file.isDirectory()) continue;
             const path = join(file.parentPath, file.name);
@@ -98,6 +98,7 @@ function nativeManifest(launcher: LauncherManifest, platform: Platform, name: st
     return {
         name,
         version,
+        license: launcher.license,
         description: `Quivra executable for ${platform.os}/${platform.cpu}`,
         repository: launcher.repository,
         homepage: launcher.homepage,
@@ -123,6 +124,7 @@ export async function verifyArtifactSet(version: string, directory: string): Pro
     assert.equal(launcher.repository.url, "git+https://github.com/pixel-brewery/quivra.git");
     assert.deepEqual(launcher.publishConfig, { registry: publicRegistry, access: "public" });
     assertNoNpmHooks(launcher);
+    const license = await readFile(new URL("../LICENSE", import.meta.url));
 
     const native = platforms.map((platform) => {
         const name = binaryPackageName(launcher.name, platform.os, platform.cpu);
@@ -140,14 +142,16 @@ export async function verifyArtifactSet(version: string, directory: string): Pro
         const archivePath = join(directory, archive);
         const executable = platform.os === "win32" ? "quivra.exe" : "quivra";
         const npmBinary = `package/${executable}`;
-        const npmPackage = checkedArchive(npmPath, ["package/package.json", npmBinary]);
-        const releaseArchive = checkedArchive(archivePath, [executable]);
+        const npmPackage = checkedArchive(npmPath, ["package/package.json", npmBinary, "package/LICENSE"]);
+        const releaseArchive = checkedArchive(archivePath, [executable, "LICENSE"]);
         if (platform.os !== "win32") {
             npmPackage.executable(npmBinary);
             releaseArchive.executable(executable);
         }
         readManifest(npmPackage.read, nativeManifest(launcher, platform, name, version, executable), npmPath);
 
+        assert(npmPackage.read("package/LICENSE").equals(license) && releaseArchive.read("LICENSE").equals(license),
+            `License differs from the source in ${npm} or ${archive}.`);
         const binary = npmPackage.read(npmBinary);
         assert(binary.length > 0 && binary.equals(releaseArchive.read(executable)),
             `Executables differ between ${npm} and ${archive}.`);
@@ -163,7 +167,7 @@ export async function verifyArtifactSet(version: string, directory: string): Pro
     }
 
     const launcherPath = join(directory, launcherFile);
-    const members = await launcherEntries();
+    const members = await launcherEntries(license);
     const launcherPackage = checkedArchive(launcherPath, ["package/package.json", ...members.keys()]);
     launcherPackage.executable("package/dist/bin/quivra.js");
     const expectedLauncher = {

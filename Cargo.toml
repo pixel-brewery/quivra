@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
+license = "MIT"
 description = "Template-driven OpenAPI client generation"
 repository = "https://github.com/pixel-brewery/quivra"
 

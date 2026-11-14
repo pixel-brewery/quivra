@@ -10,6 +10,12 @@ Quivra is a Rust CLI from Pixel Brewery that generates TypeScript clients from O
 - Follow the Rust and TypeScript naming conventions in the local skill, including Archipel-style interfaces for the Node API and the transport preset.
 - Keep actual code paths, behavior, packaging and tests authoritative. Prefer Cargo conventions and the pinned toolchain. Do not add another build system to wrap Cargo.
 
+## Issue tracking
+
+- Track project work on the [Quivra GitHub project board](https://github.com/orgs/pixel-brewery/projects/14). Public issues and pull requests belong in `pixel-brewery/quivra`. Use [private vulnerability reporting](https://github.com/pixel-brewery/quivra/security/advisories/new) for suspected vulnerabilities.
+- Before creating a follow-up, search the board and the repository's open and closed issues. Link the existing item when it already covers the work.
+- Read the board's current Status options before assigning a status. Add tracked items explicitly and verify they appear once with the intended status. Keep the backlog in GitHub.
+
 ## Verification and delivery
 
 - Run `cargo fmt --all --check`, `cargo clippy --locked --all-targets -- -D warnings` and `cargo test --locked` for relevant Rust changes. For generation changes, regenerate both examples, run `generate --check`, and run the TypeScript compiler and Node smoke test documented in the repository.

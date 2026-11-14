@@ -65,7 +65,7 @@ jobs:
           npm pack "./$staging/native" --ignore-scripts --pack-destination "$staging/artifacts"
           npm pack "./$staging/launcher" --ignore-scripts --pack-destination "$staging/artifacts"
           asset="quivra-$version-$RUST_TARGET.tar.gz"
-          tar -C "$staging/native" -czf "$staging/artifacts/$asset" "$binary"
+          tar -C "$staging/native" -czf "$staging/artifacts/$asset" "$binary" LICENSE
           node distribution/checksum.ts "$staging/artifacts/$asset"
           printf 'PACKAGE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
       - name: Test the installed npm CLI and Node API

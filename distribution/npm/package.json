@@ -1,6 +1,7 @@
 {
   "name": "@pixel-brewery/quivra",
   "private": true,
+  "license": "MIT",
   "description": "Template-driven OpenAPI client generation",
   "type": "module",
   "bin": {
