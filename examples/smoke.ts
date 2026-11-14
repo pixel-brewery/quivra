@@ -1,13 +1,22 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { IFetchOptions } from "./generated/fetch/client.ts";
+import type { ITransport } from "./generated/transport/interfaces/ITransport.ts";
+import type { ITransportRequest } from "./generated/transport/interfaces/ITransportRequest.ts";
 
 const generated = process.argv[2]
     ? pathToFileURL(resolve(process.argv[2]) + "/")
     : new URL("./generated/", import.meta.url);
-const fetchClient = await import(new URL("fetch/client.ts", generated));
-const { WidgetClient } = await import(new URL("transport/client.ts", generated));
-const { routes } = await import(new URL("transport/routes.ts", generated));
+const fetchClient: typeof import("./generated/fetch/client.ts") = await import(
+    new URL("fetch/client.ts", generated).href
+);
+const { WidgetClient }: typeof import("./generated/transport/client.ts") = await import(
+    new URL("transport/client.ts", generated).href
+);
+const { routes }: typeof import("./generated/transport/routes.ts") = await import(
+    new URL("transport/routes.ts", generated).href
+);
 
 const widget = { id: "red/1", name: "Red widget" };
 const widgetId = { path: { "widget-id": widget.id } };
@@ -19,26 +28,27 @@ const events = [
     { data: "", event: "message", id: "42" },
 ];
 
-function sortQuery(path) {
-    const [pathname, rawQuery] = path.split("?");
-    if (rawQuery === undefined) return pathname;
-    const query = new URLSearchParams(rawQuery);
+function sortQuery(path: string): string {
+    const boundary = path.indexOf("?");
+    if (boundary < 0) return path;
+    const pathname = path.slice(0, boundary);
+    const query = new URLSearchParams(path.slice(boundary + 1));
     query.sort();
     return pathname + "?" + query;
 }
 
-async function collectEvents(stream) {
-    const received = [];
+async function collectEvents<T>(stream: AsyncIterable<T>): Promise<T[]> {
+    const received: T[] = [];
     for await (const event of stream) received.push(event);
     return received;
 }
 
-function sseResponse() {
+function sseResponse(): Response {
     const bytes = new TextEncoder().encode(
         ": heartbeat\r\nid: 42\r\nevent: update\rdata: red\rdata: widget 🎨\r\n\r\ndata\n\ndata: unfinished",
     );
     let index = 0;
-    const body = new ReadableStream({
+    const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
         pull(controller) {
             if (index === bytes.length) return controller.close();
             controller.enqueue(bytes.subarray(index, ++index));
@@ -47,16 +57,20 @@ function sseResponse() {
     return new Response(body, { headers: { "content-type": "text/event-stream; charset=utf-8" } });
 }
 
-const fetchRequests = [];
-const fetchOptions = {
+const fetchRequests: Array<RequestInit & { url: string; headers: Headers }> = [];
+const fetchOptions: IFetchOptions = {
     baseUrl: "https://example.test/api/",
-    fetch: async (url, options) => {
-        fetchRequests.push({ url: sortQuery(url), ...options });
+    fetch: async (input, options) => {
+        assert.equal(typeof input, "string");
+        assert.ok(options);
+        const url = String(input);
+        const headers = new Headers(options.headers);
+        fetchRequests.push({ ...options, url: sortQuery(url), headers });
         if (options.method === "DELETE" || url.endsWith("/hidden")) {
             return new Response(null, { status: 204 });
         }
         if (options.method === "POST") {
-            return options.headers.has("authorization")
+            return headers.has("authorization")
                 ? Response.json(widget, { status: 201 })
                 : Response.json(queued, { status: 202 });
         }
@@ -86,12 +100,14 @@ assert.deepEqual(fetchRequests.map(({ url, method }) => ({ url, method })), [
     { url: "https://example.test/api/widgets?access_key=a+%26+b", method: "POST" },
     { url: "https://example.test/api/widgets/events", method: "GET" },
 ]);
-assert.equal(fetchRequests[5].headers.get("authorization"), "Bearer my-token");
-assert.equal(fetchRequests[5].headers.get("content-type"), "application/json");
-assert.equal(fetchRequests[5].redirect, "error");
-assert.equal(fetchRequests[5].body, JSON.stringify(create.body));
-assert.equal(fetchRequests[6].headers.get("x-tenant-key"), "tenant");
-assert.equal(fetchRequests[7].headers.get("accept"), "text/event-stream");
+const [bearerRequest, keyRequest, streamRequest] = fetchRequests.slice(5);
+assert.ok(bearerRequest && keyRequest && streamRequest);
+assert.equal(bearerRequest.headers.get("authorization"), "Bearer my-token");
+assert.equal(bearerRequest.headers.get("content-type"), "application/json");
+assert.equal(bearerRequest.redirect, "error");
+assert.equal(bearerRequest.body, JSON.stringify(create.body));
+assert.equal(keyRequest.headers.get("x-tenant-key"), "tenant");
+assert.equal(streamRequest.headers.get("accept"), "text/event-stream");
 await assert.rejects(fetchClient.createWidget(fetchOptions, create), /Missing credentials/);
 await assert.rejects(fetchClient.createWidget({ ...fetchOptions, credentials: { tenantKey: "partial" } }, create), /Missing credentials/);
 await assert.rejects(fetchClient.getWidget(fetchOptions, { path: { "widget-id": ".." } }), /dot segment/);
@@ -105,15 +121,19 @@ await assert.rejects(fetchClient.getWidget({
     fetch: async () => new Response(null, { status: 205 }),
 }, widgetId), /HTTP 205/);
 
-const transportRequests = [];
-const transport = {
+const transportRequests: ITransportRequest[] = [];
+const transport: ITransport = {
     async request(request) {
         transportRequests.push(request);
         if (request.method === "DELETE" || request.path.endsWith("/hidden")) {
             return { status: 204, json() { throw new Error("unexpected JSON read"); } };
         }
         if (request.path === "/widgets/events") {
-            return { status: 200, async *events() { yield* events; } };
+            return {
+                status: 200,
+                json() { throw new Error("unexpected JSON read"); },
+                async *events() { yield* events; },
+            };
         }
         if (request.method === "POST") {
             return request.headers.has("authorization")
@@ -145,9 +165,11 @@ assert.deepEqual(transportRequests.map(({ path, method }) => ({ path: sortQuery(
     { method: "POST", path: "/widgets?access_key=a+%26+b" },
     { method: "GET", path: "/widgets/events" },
 ]);
-assert.deepEqual(transportRequests[4].body, create.body);
-assert.equal(transportRequests[4].headers.get("authorization"), "Bearer my-token");
-assert.equal(transportRequests[5].headers.get("x-tenant-key"), "tenant");
+const [bearerTransportRequest, keyTransportRequest] = transportRequests.slice(4);
+assert.ok(bearerTransportRequest && keyTransportRequest);
+assert.deepEqual(bearerTransportRequest.body, create.body);
+assert.equal(bearerTransportRequest.headers.get("authorization"), "Bearer my-token");
+assert.equal(keyTransportRequest.headers.get("x-tenant-key"), "tenant");
 assert.deepEqual(routes.streamWidgets, { method: "GET", path: "/widgets/events", category: "live" });
 await assert.rejects(new WidgetClient(transport).createWidget(create), /Missing credentials/);
 

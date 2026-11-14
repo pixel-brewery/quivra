@@ -1,5 +1,11 @@
-// npm platform names and GitHub's native runner labels for the Rust release targets.
-export const platforms = [
+interface IPlatform {
+    readonly runner: string;
+    readonly target: string;
+    readonly os: "darwin" | "linux" | "win32";
+    readonly cpu: "arm64" | "x64";
+    readonly libc?: "glibc";
+}
+export const platforms: readonly IPlatform[] = [
     {
         runner: "macos-15",
         target: "aarch64-apple-darwin",

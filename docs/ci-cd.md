@@ -12,8 +12,8 @@ The stable **Quality Gate** check requires every platform job to pass.
 
 [Dependabot](../.github/dependabot.yml) checks Cargo and GitHub Actions every Monday.
 GitHub's Dependabot security updates also run when valid advisories are found.
-The npm wrapper has no managed runtime dependencies in its source manifest.
-Its platform packages are generated at the release version. See the [Dependabot guide](dependabot.md) for guarded automatic merges.
+Dependabot also tracks the TypeScript and Node type dependencies in the root npm lockfile.
+The npm wrapper’s platform packages are generated at the release version. See the [Dependabot guide](dependabot.md) for guarded automatic merges.
 
 ## Build and inspect a release candidate
 

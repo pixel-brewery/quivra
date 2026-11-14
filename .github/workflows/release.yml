@@ -79,15 +79,17 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
           package-manager-cache: false
+      - name: Install the pinned compiler
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Select this run's unexpired artifact IDs
         id: artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          expected="$(node distribution/prepare.mjs matrix | jq -c '[.include[].target | "quivra-" + .] + ["quivra-npm"] | sort')"
+          expected="$(node distribution/prepare.ts matrix | jq -c '[.include[].target | "quivra-" + .] + ["quivra-npm"] | sort')"
           artifacts="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
             | jq -cs '[.[].artifacts[] | select(.expired == false and (.name | startswith("quivra-")))] | sort_by(.name)')"
           test "$(jq -c 'map(.name)' <<< "$artifacts")" = "$expected"
@@ -101,7 +103,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           ARTIFACTS: ${{ runner.temp }}/quivra
-        run: node distribution/verify-release.mjs "$VERSION" "$ARTIFACTS"
+        run: node distribution/verify-release.ts "$VERSION" "$ARTIFACTS"
 
   publish-npm:
     if: inputs.publish
@@ -118,9 +120,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: Install the pinned compiler
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.validate.outputs.artifact-ids }}
@@ -140,7 +144,7 @@ jobs:
           if [ -n "$tag_sha" ]; then
             test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
           fi
-          node distribution/verify-release.mjs "$VERSION" "$ARTIFACTS" --publish-npm
+          node distribution/verify-release.ts "$VERSION" "$ARTIFACTS" --publish-npm
 
   release:
     if: inputs.publish

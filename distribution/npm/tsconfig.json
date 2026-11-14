@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../target/distribution/launcher/dist",
+    "declaration": true,
+    "noEmit": false,
+    "noEmitOnError": true
+  },
+  "include": ["bin/**/*.ts", "src/**/*.ts"]
+}

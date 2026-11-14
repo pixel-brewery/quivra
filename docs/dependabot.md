@@ -1,6 +1,6 @@
 # Dependency updates
 
-Dependabot checks Cargo dependencies and GitHub Actions every Monday. Compatible Cargo updates share a pull request, while major Cargo updates get individual review. GitHub Actions updates are grouped. The npm launcher has no registry dependencies of its own. Packaging generates the native package references from the release version.
+Dependabot checks Cargo dependencies, npm tooling and GitHub Actions every Monday. Compatible Cargo updates share a pull request, while major Cargo updates get individual review. GitHub Actions updates are grouped. The npm launcher has no hand-maintained runtime dependencies. TypeScript upgrades are selected explicitly. Packaging generates the native package references from the release version.
 
 ## Enable automatic merges
 

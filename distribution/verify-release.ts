@@ -1,28 +1,30 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { binaryPackageName } from "./npm/src/platform-package.mjs";
-import { platforms } from "./platforms.mjs";
+import { binaryPackageName } from "./npm/src/platform-package.ts";
+import { platforms } from "./platforms.ts";
+import { compileLauncher } from "./compileLauncher.ts";
+import { readLauncherManifest } from "./readLauncherManifest.ts";
 
 const publicRegistry = "https://registry.npmjs.org/";
 const cargoVersionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 const distribution = fileURLToPath(new URL(".", import.meta.url));
-const npmSource = join(distribution, "npm");
 const maxTarOutput = 64 * 1024 * 1024;
 
-function hash(data, algorithm, encoding) {
+function hash(data: Buffer, algorithm: string, encoding: "hex" | "base64") {
     return createHash(algorithm).update(data).digest(encoding);
 }
 
-function filename(name, version) {
+function filename(name: string, version: string) {
     return `${name.slice(1).replace("/", "-")}-${version}.tgz`;
 }
 
-function tar(file, flags, members = []) {
+function tar(file: string, flags: string, members: string[] = []) {
     try {
         return execFileSync("tar", [flags, file, "--", ...members], {
             maxBuffer: maxTarOutput,
@@ -34,47 +36,65 @@ function tar(file, flags, members = []) {
     }
 }
 
-function checkedArchive(file, members) {
+function checkedArchive(file: string, members: Iterable<string>) {
     // Only read the expected regular members to stdout. Never extract paths to disk.
     const names = tar(file, "-tzf").toString("utf8").trimEnd().split("\n");
     const types = tar(file, "-tvzf").toString("utf8").trimEnd().split("\n");
-    assert.deepEqual(names.sort(), [...members].sort(), `Unexpected entries in ${file}.`);
-    assert(types.length === members.length && types.every((line) => line.startsWith("-")),
+    const expected = [...members].sort();
+    assert.deepEqual(names.sort(), expected, `Unexpected entries in ${file}.`);
+    assert(types.length === expected.length && types.every((line) => line.startsWith("-")),
         `Only regular file entries are allowed in ${file}.`);
     return {
-        read: (member) => tar(file, "-xzOf", [member]),
-        executable: (member) => {
+        read: (member: string) => tar(file, "-xzOf", [member]),
+        executable: (member: string) => {
             const listing = types.find((line) => line.endsWith(` ${member}`));
             assert(listing && listing[3] === "x", `Expected executable mode for ${member} in ${file}.`);
         },
     };
 }
 
-async function regularFile(path) {
+async function regularFile(path: string) {
     assert((await lstat(path)).isFile(), `Expected a regular file at ${path}.`);
 }
 
-function readManifest(read, expected, path) {
+function readManifest(read: (member: string) => Buffer, expected: object, path: string) {
     const manifest = JSON.parse(read("package/package.json").toString("utf8"));
     assert.deepEqual(manifest, expected, `Unexpected package manifest in ${path}.`);
 }
 
-async function launcherEntries() {
-    const files = await readdir(npmSource, { recursive: true, withFileTypes: true });
-    const entries = new Map([["package/README.md", join(distribution, "..", "docs", "distribution.md")]]);
-    for (const file of files) {
-        if (file.isDirectory()) continue;
-        const path = join(file.parentPath, file.name);
-        const member = path.slice(npmSource.length + 1).split(sep).join("/");
-        if (member.startsWith("bin/") || member.startsWith("src/")) {
-            assert(file.isFile(), `Expected a regular source file at ${path}.`);
-            entries.set(`package/${member}`, path);
+async function launcherEntries(): Promise<Map<string, Buffer>> {
+    const staging = await mkdtemp(join(tmpdir(), "quivra-launcher-"));
+    try {
+        compileLauncher(staging);
+        const files = await readdir(staging, { recursive: true, withFileTypes: true });
+        const entries = new Map([[
+            "package/README.md",
+            await readFile(join(distribution, "..", "docs", "distribution.md")),
+        ]]);
+        for (const file of files) {
+            if (file.isDirectory()) continue;
+            const path = join(file.parentPath, file.name);
+            const member = path.slice(staging.length + 1).split(sep).join("/");
+            assert(file.isFile(), `Expected a regular generated file at ${path}.`);
+            entries.set(`package/dist/${member}`, await readFile(path));
         }
+        return entries;
+    } finally {
+        await rm(staging, { recursive: true, force: true });
     }
-    return entries;
 }
 
-function nativeManifest(launcher, platform, name, version, executable) {
+type LauncherManifest = Awaited<ReturnType<typeof readLauncherManifest>>;
+type Platform = (typeof platforms)[number];
+
+interface IPackageArtifact {
+    name: string;
+    path: string;
+    version: string;
+    integrity: string;
+}
+
+function nativeManifest(launcher: LauncherManifest, platform: Platform, name: string, version: string, executable: string) {
     return {
         name,
         version,
@@ -90,15 +110,15 @@ function nativeManifest(launcher, platform, name, version, executable) {
     };
 }
 
-function assertNoNpmHooks(manifest) {
+function assertNoNpmHooks(manifest: object) {
     for (const key of ["scripts", "gypfile", "dependencies", "devDependencies", "peerDependencies", "bundledDependencies", "bundleDependencies"]) {
         assert(!Object.hasOwn(manifest, key), `Release packages must omit ${key}.`);
     }
 }
 
-export async function verifyArtifactSet(version, directory) {
+export async function verifyArtifactSet(version: string, directory: string): Promise<IPackageArtifact[]> {
     assert(cargoVersionPattern.test(version), "Expected an exact release version such as 0.1.0.");
-    const launcher = JSON.parse(await readFile(join(npmSource, "package.json"), "utf8"));
+    const launcher = await readLauncherManifest();
     assert.equal(launcher.name, "@pixel-brewery/quivra");
     assert.equal(launcher.repository.url, "git+https://github.com/pixel-brewery/quivra.git");
     assert.deepEqual(launcher.publishConfig, { registry: publicRegistry, access: "public" });
@@ -114,7 +134,7 @@ export async function verifyArtifactSet(version, directory) {
     assert.deepEqual((await readdir(directory)).sort(), expectedNames, "Unexpected release artifact names.");
     await Promise.all(expectedNames.map((name) => regularFile(join(directory, name))));
 
-    const packages = [];
+    const packages: IPackageArtifact[] = [];
     for (const { platform, name, npm, archive, sidecar } of native) {
         const npmPath = join(directory, npm);
         const archivePath = join(directory, archive);
@@ -145,7 +165,7 @@ export async function verifyArtifactSet(version, directory) {
     const launcherPath = join(directory, launcherFile);
     const members = await launcherEntries();
     const launcherPackage = checkedArchive(launcherPath, ["package/package.json", ...members.keys()]);
-    launcherPackage.executable("package/bin/quivra.mjs");
+    launcherPackage.executable("package/dist/bin/quivra.js");
     const expectedLauncher = {
         ...launcher,
         version,
@@ -154,7 +174,7 @@ export async function verifyArtifactSet(version, directory) {
     delete expectedLauncher.private;
     readManifest(launcherPackage.read, expectedLauncher, launcherPath);
     for (const [member, source] of members) {
-        assert(launcherPackage.read(member).equals(await readFile(source)), `Packed ${member} differs from the source.`);
+        assert(launcherPackage.read(member).equals(source), `Packed ${member} differs from the source.`);
     }
     packages.push({
         name: launcher.name,
@@ -167,7 +187,7 @@ export async function verifyArtifactSet(version, directory) {
     return packages;
 }
 
-async function registryIntegrity({ name, version }, fetchMetadata = fetch) {
+async function registryIntegrity({ name, version }: IPackageArtifact, fetchMetadata = fetch): Promise<string | null> {
     const versionUrl = new URL(`${encodeURIComponent(name)}/${version}`, publicRegistry);
     const response = await fetchMetadata(versionUrl, {
         headers: { accept: "application/json", "cache-control": "no-cache" },
@@ -176,8 +196,9 @@ async function registryIntegrity({ name, version }, fetchMetadata = fetch) {
     });
     const label = `${name}@${version}`;
     if (response.status === 404) {
-        const body = await response.json();
-        const reason = typeof body === "string" ? body : body?.error;
+        const body: unknown = await response.json();
+        const reason = typeof body === "string" ? body :
+            body && typeof body === "object" && "error" in body ? body.error : undefined;
         assert(
             reason === "Not Found" || reason === "not_found" || reason === `version not found: ${version}`,
             `npm registry returned an unexpected absence response for ${label}.`,
@@ -185,20 +206,29 @@ async function registryIntegrity({ name, version }, fetchMetadata = fetch) {
         return null;
     }
     if (!response.ok) throw new Error(`npm registry returned HTTP ${response.status} for ${label}.`);
-    const published = await response.json();
-    assert(published.name === name && published.version === version,
+    const published: unknown = await response.json();
+    assert(published && typeof published === "object" &&
+        "name" in published && published.name === name &&
+        "version" in published && published.version === version,
         `npm registry returned unexpected package identity for ${label}.`);
-    const integrity = published.dist?.integrity;
-    assert(typeof integrity === "string" && integrity.length > 0,
+    assert("dist" in published && published.dist && typeof published.dist === "object" &&
+        "integrity" in published.dist && typeof published.dist.integrity === "string" &&
+        published.dist.integrity.length > 0,
         `npm registry has no integrity for ${label}.`);
-    return integrity;
+    return published.dist.integrity;
 }
 
-export async function publishCheckedPackages(packages, {
+interface IPublishOptions {
+    publish: (file: string) => unknown;
+    fetchMetadata?: typeof fetch;
+    pause?: (milliseconds: number) => Promise<unknown>;
+}
+
+export async function publishCheckedPackages(packages: readonly IPackageArtifact[], {
     publish,
     fetchMetadata = fetch,
     pause = delay,
-}) {
+}: IPublishOptions): Promise<void> {
     assert.equal(typeof publish, "function", "A publication callback is required.");
     // Check the entire release first so a collision in a later package prevents earlier writes.
     const published = await Promise.all(packages.map((entry) => registryIntegrity(entry, fetchMetadata)));
@@ -247,7 +277,7 @@ function requireReleaseWorkflow() {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     const [version, directory, mode, ...extra] = process.argv.slice(2);
     if (!version || !directory || (mode !== undefined && mode !== "--publish-npm") || extra.length > 0) {
-        throw new Error("Usage: node distribution/verify-release.mjs VERSION ARTIFACTS [--publish-npm]");
+        throw new Error("Usage: node distribution/verify-release.ts VERSION ARTIFACTS [--publish-npm]");
     }
     if (mode === "--publish-npm") requireReleaseWorkflow();
     const packages = await verifyArtifactSet(version, resolve(directory));

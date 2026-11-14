@@ -3,7 +3,9 @@ import { appendFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { generate, inspect } from "@pixel-brewery/quivra";
 
-const repo = resolve(process.argv[2]);
+const repositoryPath = process.argv[2];
+if (!repositoryPath) throw new Error("Provide the Quivra checkout path.");
+const repo = resolve(repositoryPath);
 const spec = resolve(repo, "examples/openapi.yaml");
 const profile = resolve(repo, "examples/profiles/fetch");
 const out = resolve("generated path with spaces");

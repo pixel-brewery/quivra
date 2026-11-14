@@ -39,11 +39,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
           package-manager-cache: false
 
       - name: Squash merge the verified Dependabot head
         env:
           GH_TOKEN: ${{ github.token }}
           QUIVRA_DEPENDABOT_AUTO_MERGE: ${{ vars.QUIVRA_DEPENDABOT_AUTO_MERGE }}
-        run: node .github/scripts/mergeDependabotPullRequest.mjs
+        run: node .github/scripts/mergeDependabotPullRequest.ts
