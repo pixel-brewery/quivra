@@ -49,3 +49,7 @@ The CLI is currently available from source and from verified GitHub Actions arti
 - [CI, releases and dependency updates](docs/ci-cd.md) covers checks, Dependabot and release preparation.
 - [Architecture and contributor checks](docs/architecture.md) explain where to make changes and how to verify them.
 - [Contributing](CONTRIBUTING.md) covers development and reporting bugs. Use the [security policy](SECURITY.md) to report vulnerabilities privately.
+
+## License
+
+Quivra is distributed under the [MIT License](LICENSE).

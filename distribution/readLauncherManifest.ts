@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 interface ILauncherManifest {
     readonly name: string;
+    readonly license: "MIT";
     readonly private?: boolean;
     readonly repository: { readonly url: string };
     readonly homepage: string;
@@ -14,6 +15,7 @@ export async function readLauncherManifest(): Promise<ILauncherManifest> {
     const source = new URL("./npm/package.json", import.meta.url);
     const manifest: unknown = JSON.parse(await readFile(source, "utf8"));
     assert(manifest && typeof manifest === "object");
+    assert("license" in manifest && manifest.license === "MIT");
     assert("name" in manifest && typeof manifest.name === "string");
     assert("repository" in manifest && manifest.repository && typeof manifest.repository === "object");
     assert("url" in manifest.repository && typeof manifest.repository.url === "string");

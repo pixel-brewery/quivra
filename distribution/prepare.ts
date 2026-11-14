@@ -55,6 +55,7 @@ if (command === "matrix" && targetOrOutput === undefined) {
     compileLauncher(join(output, "dist"));
     await chmod(join(output, "dist", "bin", "quivra.js"), 0o755);
     await copyFile(join(sourceRoot, "docs", "distribution.md"), join(output, "README.md"));
+    await copyFile(join(sourceRoot, "LICENSE"), join(output, "LICENSE"));
     await writeManifest(output, manifest);
 } else if (command === "native" && binaryArgument !== undefined && nativeOutput !== undefined && extra.length === 0) {
     const platform = npmPlatforms.find((entry) => entry.target === targetOrOutput);
@@ -77,6 +78,7 @@ if (command === "matrix" && targetOrOutput === undefined) {
     const manifest = {
         name: platform.npm_name,
         version,
+        license: launcher.license,
         description: `Quivra executable for ${platform.os}/${platform.cpu}`,
         repository: launcher.repository,
         homepage: launcher.homepage,
@@ -91,6 +93,7 @@ if (command === "matrix" && targetOrOutput === undefined) {
     const executable = join(output, binaryName);
     await copyFile(binary, executable);
     await chmod(executable, 0o755);
+    await copyFile(join(sourceRoot, "LICENSE"), join(output, "LICENSE"));
     await writeManifest(output, manifest);
 } else {
     console.error(

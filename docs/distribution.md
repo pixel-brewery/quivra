@@ -41,7 +41,7 @@ await generate({ ...options, out: "src/api", check: true });
 
 ## First release and trusted publishing
 
-The repository owner chooses the distribution license before the first public release. The package preparation currently leaves the license metadata unset.
+Quivra is distributed under the MIT License. The npm tarballs and native release archives include the license.
 
 npm requires the packages to exist before adding Trusted Publishers. For the initial publication, a Pixel Brewery npm maintainer can use the tarballs from one reviewed packaging run. Sign in to the public registry and publish the six native tarballs with `npm publish --access public ./<native-package-version>.tgz`. Confirm the native versions are visible from the registry, then publish `./pixel-brewery-quivra-<version>.tgz` the same way. [Publishing public organization packages](https://docs.npmjs.com/creating-and-publishing-an-organization-scoped-package/) · [npm trust prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites)
 
