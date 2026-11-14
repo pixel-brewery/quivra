@@ -156,3 +156,58 @@ fn check_does_not_create_missing_output_and_rejects_nonportable_profiles() {
         assert!(!output.exists());
     }
 }
+
+#[test]
+fn batch_validates_every_document_before_updating_owned_files() {
+    let staging = tempdir().unwrap();
+    let root = staging.path();
+    let output = root.join("out");
+    fs::copy("examples/openapi.yaml", root.join("api.yaml")).unwrap();
+    fs::write(
+        root.join("profile.json"),
+        r#"{"version":1,"files":{"client.ts":"client.jinja"},"batchFiles":{"index.ts":"index.jinja"},"serviceFiles":[{"directory":"services","suffix":"Client","template":"service.jinja"}]}"#,
+    )
+    .unwrap();
+    fs::write(root.join("client.jinja"), "{{ api.title }}\n").unwrap();
+    fs::write(root.join("service.jinja"), "{{ service.type_name }}\n").unwrap();
+    fs::write(
+        root.join("index.jinja"),
+        "{% for doc in documents %}{{ doc.namespace }}:{{ doc.directory }}\n{% endfor %}",
+    )
+    .unwrap();
+    let batch = root.join("batch.json");
+    let mut args = vec![
+        "generate-batch",
+        batch.to_str().unwrap(),
+        "--profile",
+        root.to_str().unwrap(),
+        "--out",
+        output.to_str().unwrap(),
+    ];
+    let first = r#"{"namespace":"firstApi","directory":"first-api","spec":"api.yaml"}"#;
+    let missing = r#"{"namespace":"secondApi","directory":"second-api","spec":"missing.yaml"}"#;
+    fs::write(&batch, format!("[{first},{missing}]")).unwrap();
+    assert!(!cli(&args).status.success());
+    assert!(!output.exists());
+
+    fs::write(&batch, format!("[{first}]")).unwrap();
+    success(cli(&args));
+    assert_eq!(
+        fs::read_to_string(output.join("index.ts")).unwrap(),
+        "firstApi:first-api\n"
+    );
+    assert!(output.join("first-api/client.ts").is_file());
+    assert_eq!(
+        fs::read_dir(output.join("first-api/services"))
+            .unwrap()
+            .count(),
+        1
+    );
+
+    fs::write(&batch, format!("[{first},{missing}]")).unwrap();
+    assert!(!cli(&args).status.success());
+    assert!(!output.join("second-api").exists());
+    fs::write(&batch, format!("[{first}]")).unwrap();
+    args.push("--check");
+    success(cli(&args));
+}

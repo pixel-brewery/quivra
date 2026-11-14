@@ -9,6 +9,9 @@ use crate::openapi::Schema;
 #[derive(Serialize)]
 pub(crate) struct Model {
     name: String,
+    raw_name: String,
+    description: Option<String>,
+    extensions: BTreeMap<String, Value>,
     fields: Vec<Field>,
     type_alias: Option<String>,
     imports: BTreeSet<ModelImport>,
@@ -26,28 +29,54 @@ impl Model {
 
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub(super) struct ModelImport {
-    name: String,
+    pub(super) name: String,
     is_type_alias: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(super) struct Field {
     pub name: String,
     #[serde(rename = "type")]
     pub type_expression: String,
     pub optional: bool,
+    pub deprecated: bool,
+    pub description: Option<String>,
+}
+
+pub(super) fn retain_used_models<'a>(
+    models: &mut Vec<Model>,
+    roots: impl IntoIterator<Item = &'a ModelImport>,
+) {
+    let by_name: BTreeMap<_, _> = models
+        .iter()
+        .map(|model| (model.name.as_str(), model))
+        .collect();
+    let mut frontier: Vec<_> = roots.into_iter().map(|root| root.name.as_str()).collect();
+    let mut used = BTreeSet::new();
+    while let Some(name) = frontier.pop() {
+        if used.insert(name)
+            && let Some(model) = by_name.get(name)
+        {
+            frontier.extend(model.imports.iter().map(|model| model.name.as_str()));
+        }
+    }
+    let used: BTreeSet<_> = used.into_iter().map(str::to_owned).collect();
+    models.retain(|model| used.contains(&model.name));
 }
 
 pub(super) struct SchemaTypes<'a> {
     schemas: &'a BTreeMap<String, Schema>,
     names: BTreeMap<&'a str, ModelImport>,
+    preserve_nullable_annotations: bool,
 }
 
 impl<'a> SchemaTypes<'a> {
     pub fn new(
         schemas: &'a BTreeMap<String, Schema>,
         interface_prefix: &str,
+        alias_prefix: &str,
         event_type: &str,
+        preserve_nullable_annotations: bool,
     ) -> Result<Self> {
         reject_alias_cycles(schemas)?;
         let mut allocated = BTreeSet::new();
@@ -55,6 +84,9 @@ impl<'a> SchemaTypes<'a> {
         for (raw, schema) in schemas {
             let mut name = super::identifier(raw);
             let is_type_alias = !is_interface(schema);
+            if is_type_alias && !alias_prefix.is_empty() {
+                name = super::interface_name(alias_prefix, &super::type_name(raw));
+            }
             if !is_type_alias {
                 name = super::interface_name(interface_prefix, &name);
             }
@@ -74,7 +106,44 @@ impl<'a> SchemaTypes<'a> {
                 },
             );
         }
-        Ok(Self { schemas, names })
+        Ok(Self {
+            schemas,
+            names,
+            preserve_nullable_annotations,
+        })
+    }
+
+    pub fn reference_import(&self, schema: &Schema) -> Option<&ModelImport> {
+        let name = schema
+            .reference
+            .as_deref()?
+            .strip_prefix("#/components/schemas/")?;
+        self.names.get(name)
+    }
+
+    pub fn envelope_property(&self, schema: &Schema) -> Option<String> {
+        let mut current = schema;
+        for _ in 0..=self.schemas.len() {
+            if let Some(property) = current
+                .other
+                .get("x-archipel-envelope")
+                .and_then(|extension| {
+                    if extension.get("version").and_then(Value::as_u64) != Some(2) {
+                        return None;
+                    }
+                    extension.get("dataProperty").and_then(Value::as_str)
+                })
+                .filter(|property| !property.is_empty())
+            {
+                return Some(property.to_owned());
+            }
+            let name = current
+                .reference
+                .as_deref()?
+                .strip_prefix("#/components/schemas/")?;
+            current = self.schemas.get(name)?;
+        }
+        None
     }
 
     pub fn is_scalar(&self, schema: &Schema) -> bool {
@@ -124,6 +193,18 @@ impl<'a> SchemaTypes<'a> {
         imports.remove(declaration);
         Ok(Model {
             name: declaration.name.clone(),
+            raw_name: name.to_owned(),
+            description: schema
+                .other
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            extensions: schema
+                .other
+                .iter()
+                .filter(|(name, _)| name.starts_with("x-"))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
             fields,
             type_alias,
             imports,
@@ -137,6 +218,18 @@ impl<'a> SchemaTypes<'a> {
     ) -> Result<String> {
         validate_shape(schema)?;
         let mut parts = Vec::new();
+        let nullable_result = self.preserve_nullable_annotations && schema.nullable;
+        // The compatibility projection allows an explicit nullable annotation
+        // to apply to the whole shape, including Swagger-produced composition.
+        let has_restricting_shape = !schema.values.is_empty()
+            || ["const", "allOf", "anyOf", "oneOf"]
+                .iter()
+                .any(|keyword| schema.other.contains_key(*keyword));
+        let redundant_object = nullable_result
+            && has_restricting_shape
+            && schema.kind.as_deref() == Some("object")
+            && schema.properties.is_empty()
+            && additional(schema).is_none();
         if let Some(reference) = &schema.reference {
             let key = reference
                 .strip_prefix("#/components/schemas/")
@@ -160,10 +253,10 @@ impl<'a> SchemaTypes<'a> {
                 .collect::<Result<BTreeSet<_>>>()?;
             parts.push(literals.into_iter().collect::<Vec<_>>().join(" | "));
         }
-        if parts.is_empty() || schema.kind.is_some() || is_object(schema) {
+        if !redundant_object && (parts.is_empty() || schema.kind.is_some() || is_object(schema)) {
             let base = self.base(schema, imports)?;
             if let Some(mut expression) = base {
-                if schema.nullable {
+                if schema.nullable && !nullable_result {
                     expression.push_str(" | null");
                 }
                 parts.push(expression);
@@ -184,7 +277,7 @@ impl<'a> SchemaTypes<'a> {
                 parts.push(alternatives.join(separator));
             }
         }
-        Ok(match parts.as_slice() {
+        let expression = match parts.as_slice() {
             [] => "unknown".into(),
             [only] => only.clone(),
             _ => parts
@@ -192,7 +285,11 @@ impl<'a> SchemaTypes<'a> {
                 .map(|part| format!("({part})"))
                 .collect::<Vec<_>>()
                 .join(" & "),
-        })
+        };
+        if nullable_result && expression != "null" && expression != "unknown" {
+            return Ok(format!("{expression} | null"));
+        }
+        Ok(expression)
     }
 
     fn base(&self, schema: &Schema, imports: &mut BTreeSet<ModelImport>) -> Result<Option<String>> {
@@ -247,7 +344,7 @@ impl<'a> SchemaTypes<'a> {
             }
         }
         if entries.is_empty() {
-            return Ok("{ [key: string]: unknown }".into());
+            return Ok("object".into());
         }
         Ok(format!("{{ {} }}", entries.join("; ")))
     }
@@ -270,6 +367,16 @@ impl<'a> SchemaTypes<'a> {
                         .expression(field, imports)
                         .with_context(|| format!("property {name:?}"))?,
                     optional: !schema.required.contains(name),
+                    deprecated: field
+                        .other
+                        .get("deprecated")
+                        .and_then(Value::as_bool)
+                        .unwrap_or_default(),
+                    description: field
+                        .other
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
                 })
             })
             .collect()
@@ -406,7 +513,7 @@ mod tests {
                 })),
             ),
         ]);
-        let types = SchemaTypes::new(&schemas, "I", "IQuivraEvent").unwrap();
+        let types = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false).unwrap();
         let models = types.models().unwrap();
         assert_eq!(models[0].name, "IEvent_Payload");
         assert!(models[0].imports.is_empty());
@@ -428,13 +535,39 @@ mod tests {
     #[test]
     fn keeps_existing_interface_prefixes_and_rejects_projected_name_collisions() {
         let mut schemas = BTreeMap::from([("IWidget".into(), schema(json!({"type":"object"})))]);
-        let types = SchemaTypes::new(&schemas, "I", "IQuivraEvent").unwrap();
+        let types = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false).unwrap();
         assert_eq!(types.models().unwrap()[0].name(), "IWidget");
         schemas.insert("Widget".into(), schema(json!({"type":"object"})));
-        let error = SchemaTypes::new(&schemas, "I", "IQuivraEvent")
+        let error = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", false)
             .err()
             .unwrap();
         assert!(error.to_string().contains("schema name collision"));
+    }
+
+    #[test]
+    fn preserves_explicit_nullable_wrappers_when_enabled() {
+        let schemas = BTreeMap::from([(
+            "Target".into(),
+            schema(json!({
+                "type":"object",
+                "properties":{"name":{"type":"string"}}
+            })),
+        )]);
+        let types = SchemaTypes::new(&schemas, "I", "", "IQuivraEvent", true).unwrap();
+        let composed = schema(json!({
+            "type":"object", "nullable":true, "allOf":[{"$ref":"#/components/schemas/Target"}]
+        }));
+        let mut imports = BTreeSet::new();
+        assert_eq!(
+            types.expression(&composed, &mut imports).unwrap(),
+            "(ITarget) | null"
+        );
+        assert_eq!(imports.iter().next().unwrap().name, "ITarget");
+        let literal = schema(json!({"type":"string","enum":["on"],"nullable":true}));
+        assert_eq!(
+            types.expression(&literal, &mut imports).unwrap(),
+            r#"("on") & (string) | null"#
+        );
     }
 
     #[test]
@@ -447,7 +580,7 @@ mod tests {
             })),
         )]);
         assert!(
-            SchemaTypes::new(&schemas, "", "QuivraEvent")
+            SchemaTypes::new(&schemas, "", "", "QuivraEvent", false)
                 .unwrap()
                 .models()
                 .is_ok()
@@ -458,7 +591,9 @@ mod tests {
                 "allOf":[{"$ref":"#/components/schemas/Node"}]
             })),
         );
-        let error = SchemaTypes::new(&schemas, "", "QuivraEvent").err().unwrap();
+        let error = SchemaTypes::new(&schemas, "", "", "QuivraEvent", false)
+            .err()
+            .unwrap();
         assert!(error.to_string().contains("unguarded recursive type alias"));
     }
 }

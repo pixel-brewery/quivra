@@ -11,22 +11,29 @@ Run **Package distributions** from the repository's Actions tab on the commit yo
 
 The separate `quivra-npm` artifact contains the platform-independent `@pixel-brewery/quivra` npm tarball.
 
-The matrix covers Intel and Apple Silicon macOS, x64 and ARM64 Linux with glibc, and x64 and ARM64 Windows. The Linux builds use Ubuntu 22.04 runners. The release workflow attaches the native archive and checksum for each target to the GitHub Release. A downloaded archive contains the executable and can be used without Node or Rust. GitHub Releases are visible to people who can read the source repository. [GitHub Releases documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
+The matrix covers Intel and Apple Silicon macOS, x64 and ARM64 Linux with glibc, and x64 and ARM64 Windows. The Linux builds use Ubuntu 22.04 runners. When requested, the release workflow attaches the native archive and checksum for each target to the GitHub Release. A downloaded archive contains the executable and can be used without Node or Rust. GitHub Releases are visible to people who can read the source repository. [GitHub Releases documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 
 On Linux or macOS, verify and extract the chosen archive with `sha256sum -c <archive>.sha256` or `shasum -a 256 -c <archive>.sha256`, then `tar -xzf <archive>`. Windows includes `tar.exe` for extraction and PowerShell's `Get-FileHash -Algorithm SHA256 <archive>` for comparing the checksum.
 
 ## npm distribution
 
-The public package is `@pixel-brewery/quivra` on `registry.npmjs.org`. Its optional dependencies are pinned to the same Cargo version. macOS uses `@pixel-brewery/quivra-darwin-<arch>`, Linux uses `@pixel-brewery/quivra-linux-<arch>-gnu`, and Windows uses `@pixel-brewery/quivra-win32-<arch>-msvc`. Each native package declares the matching npm platform constraints. Keep optional dependencies enabled during installation. The packages have no lifecycle install scripts or separate binary downloads. [npm package manifest documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/)
+The public package is `@pixel-brewery/quivra` on the GitHub Packages npm registry at `npm.pkg.github.com`. Its optional dependencies are pinned to the same Cargo version. macOS uses `@pixel-brewery/quivra-darwin-<arch>`, Linux uses `@pixel-brewery/quivra-linux-<arch>-gnu`, and Windows uses `@pixel-brewery/quivra-win32-<arch>-msvc`. Each native package declares the matching npm platform constraints. Keep optional dependencies enabled during installation. The packages have no lifecycle install scripts or separate binary downloads. [npm package manifest documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/)
 
-Once published, use:
+After publication, configure the `@pixel-brewery` scope in the consuming project's `.npmrc`:
+
+```ini
+@pixel-brewery:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+GitHub Packages requires authentication even for public npm packages. Use an existing classic GitHub personal access token with `read:packages`, or the consuming workflow's `GITHUB_TOKEN` with `packages: read` and package access. Keep the token in the environment. Mosaik already routes this scope to GitHub Packages. [GitHub Packages npm authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry#authenticating-to-github-packages)
+
+Then install and run Quivra:
 
 ```sh
 npm install -D @pixel-brewery/quivra
 npx quivra --help
 ```
-
-npm resolves an entire scope through its configured registry. If a project routes `@pixel-brewery` to GitHub Packages, that registry will also receive Quivra requests. The install commands above apply to projects where the scope resolves to the public npm registry. [npm scope and registry configuration](https://docs.npmjs.com/cli/v11/using-npm/scope/#associating-a-scope-with-a-registry)
 
 The optional ESM API invokes the same Rust commands. Paths are resolved relative to the calling process's working directory.
 
@@ -39,24 +46,15 @@ await generate({ ...options, out: "src/api" });
 await generate({ ...options, out: "src/api", check: true });
 ```
 
-## First release and trusted publishing
+Use `generateBatch({ batch, profile, out })` with a JSON [batch manifest](https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md#generating-multiple-documents) to generate several clients and a shared index in one run. Set `check: true` to test the complete output for drift.
+
+## First release
 
 Quivra is distributed under the MIT License. The npm tarballs and native release archives include the license.
 
-npm requires the packages to exist before adding Trusted Publishers. For the initial publication, a Pixel Brewery npm maintainer can use the tarballs from one reviewed packaging run. Sign in to the public registry and publish the six native tarballs with `npm publish --access public ./<native-package-version>.tgz`. Confirm the native versions are visible from the registry, then publish `./pixel-brewery-quivra-<version>.tgz` the same way. [Publishing public organization packages](https://docs.npmjs.com/creating-and-publishing-an-organization-scoped-package/) · [npm trust prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites)
+Run **Release Quivra** from `main` with **publish** selected. Leave **github_release** unchecked for a packages-only publication. GitHub Packages initially creates each package with private visibility. After the first workflow upload, open the package settings for each of the six native packages and the launcher and set **Danger Zone → Change visibility → Public**. The organization must allow public packages. The workflow's public-package check lists the packages that still need their visibility changed. Once all seven are public, re-run the failed jobs from that same release run. [GitHub Packages visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-packages-for-an-organization)
 
-Configure a Trusted Publisher for every package in npm's package settings:
-
-| Setting | Value |
-| --- | --- |
-| Provider | GitHub Actions |
-| Organization or user | `pixel-brewery` |
-| Repository | `quivra` |
-| Workflow filename | `release.yml` |
-| Environment | `release-main` |
-| Allowed action | Direct publish (`npm publish`) |
-
-Set up the publisher when the first OIDC release is ready to run. npm expires a new configuration after two days if it has yet to publish successfully. For the first GitHub Release, a maintainer can attach the native archives and sidecars from the same reviewed packaging run. For subsequent releases, a maintainer dispatches the release workflow from protected `main`. Publishing through that workflow requires the public canonical repository and approval through the `release-main` environment. Packaging verification also works while the repository is private. See [the CI/CD guide](https://github.com/pixel-brewery/quivra/blob/main/docs/ci-cd.md) for the workflow and repository settings. GitHub Release visibility follows the repository, and automatic npm provenance requires public source and public packages. [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) · [GitHub Releases documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
+For later versions, dispatch the release workflow from protected `main` and approve `release-main`. The job uses the repository's Actions token to publish the exact candidate tarballs. See [the CI/CD guide](https://github.com/pixel-brewery/quivra/blob/main/docs/ci-cd.md) for repository settings.
 
 ## Build a package locally
 

@@ -24,25 +24,24 @@ The npm wrapper’s platform packages are generated at the release version. See 
    workflow run. The release workflow runs the same CI first, installs and tests
    each platform package, and verifies the combined archive manifests and binary checksums.
 
-For the first public npm release, use the reviewed tarballs from a single successful
-candidate run as described in the [distribution guide](distribution.md).
-A maintainer can attach that same run's native archive and checksum files to a GitHub
-Release pointing to the candidate's commit.
+## Publish to GitHub Packages
 
-## Enable the publishing job
+- Keep the canonical source repository public and protect `main` with pull-request rules,
+  deletion and force-push protection, and strict **Quality Gate** checks.
+- Keep `release-main` restricted to `main` with a required release reviewer.
+- Allow public GitHub Packages in the organization so a package administrator can set the
+  seven packages to Public after their first upload.
 
-- Make the canonical source repository public for npm provenance and the required
-  GitHub protection on this repository's current plan.
-- Protect `main` with pull-request review rules, deletion and force-push protection,
-  and require **Quality Gate** with up-to-date branches.
-- Keep `release-main` restricted to `main`. Configure the desired release reviewer
-  in this environment after GitHub makes that protection available.
-- Configure direct Trusted Publishing for all seven npm packages. Use
-  `pixel-brewery/quivra`, `release.yml`, and `release-main`.
+To publish packages, select **publish** in **Release Quivra**. Leave **github_release** unchecked
+to publish the npm packages without creating a release or tag. Select both options to also
+create a GitHub Release from the same commit and native artifacts.
 
-When releasing a new version, select **publish** in **Release Quivra**.
-The workflow checks the repository, branch, verification jobs, package contents
-and existing published bytes. Each npm platform package is published before the
-launcher. The GitHub Release is created from the same commit and native artifacts.
-After a partial registry failure, retry failed jobs in the original run so the
-artifacts remain byte-for-byte identical.
+The workflow checks the repository, branch, verification jobs, package contents, and existing
+published bytes. The GitHub Actions `GITHUB_TOKEN` writes the six native packages before the
+launcher. A read-only job then verifies public visibility, canonical repository association,
+and exact downloaded archive bytes.
+
+On the first release, set all seven packages to **Public** when the visibility check asks.
+Re-run failed jobs in the original run to preserve the exact verified artifacts. Follow the same
+retry procedure after a partial upload failure. The [distribution guide](distribution.md) explains
+package visibility and consumer authentication.

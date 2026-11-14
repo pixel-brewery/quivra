@@ -2,38 +2,65 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
+use serde_json::Value;
 
 use super::schemas::{Field, ModelImport, SchemaTypes};
 use crate::openapi::{Api, ApiKeyLocation, Endpoint, SecurityScheme};
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(super) struct ClientOperation<'a> {
     id: String,
+    raw_id: String,
+    pub(super) tags: Vec<String>,
+    pub(super) deprecated: bool,
+    description: Option<String>,
     imports: BTreeSet<ModelImport>,
     method: String,
     path: &'a str,
     path_parameters: Vec<Field>,
     query_parameters: Vec<Field>,
+    parameters: Vec<ClientParameter>,
     body_type: Option<String>,
     body_optional: bool,
     response_type: String,
     responses: Vec<ClientResponse>,
+    all_responses: Vec<ResponseSummary>,
     accept: Option<String>,
     security: Vec<Vec<Credential>>,
     summary: Option<String>,
-    extensions: BTreeMap<String, serde_json::Value>,
+    extensions: BTreeMap<String, Value>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct ClientResponse {
     status: Option<u16>,
     kind: &'static str,
     #[serde(rename = "type")]
     type_expression: String,
     media_type: Option<String>,
+    wire_type: Option<String>,
+    wire_schema_type: Option<String>,
+    schema_name: Option<String>,
+    description: Option<String>,
+    imports: BTreeSet<ModelImport>,
+    envelope_property: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
+struct ClientParameter {
+    location: String,
+    #[serde(flatten)]
+    field: Field,
+}
+
+#[derive(Clone, Serialize)]
+struct ResponseSummary {
+    status: String,
+    description: Option<String>,
+    media_types: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
 struct Credential {
     name: String,
     kind: &'static str,
@@ -46,6 +73,12 @@ impl ClientOperation<'_> {
         &self.imports
     }
 
+    pub fn model_references(&self) -> impl Iterator<Item = &ModelImport> {
+        self.imports
+            .iter()
+            .chain(self.responses.iter().flat_map(|response| &response.imports))
+    }
+
     pub fn uses_sse(&self) -> bool {
         self.responses.iter().any(|response| response.kind == "sse")
     }
@@ -55,8 +88,13 @@ pub(super) fn build<'a>(
     api: &'a Api,
     types: &SchemaTypes<'_>,
     event_type: &str,
+    exclude_deprecated_operations: bool,
 ) -> Result<Vec<ClientOperation<'a>>> {
-    let endpoints = api.endpoints()?;
+    let endpoints: Vec<_> = api
+        .endpoints()?
+        .into_iter()
+        .filter(|endpoint| !(exclude_deprecated_operations && endpoint.operation.deprecated))
+        .collect();
     let ids = super::names(
         endpoints
             .iter()
@@ -74,6 +112,7 @@ pub(super) fn build<'a>(
                 types,
                 event_type,
                 &api.components.security_schemes,
+                exclude_deprecated_operations,
             )
             .with_context(|| label)
         })
@@ -86,12 +125,17 @@ fn build_operation<'a>(
     types: &SchemaTypes<'_>,
     event_type: &str,
     schemes: &BTreeMap<String, SecurityScheme>,
+    exclude_deprecated_operations: bool,
 ) -> Result<ClientOperation<'a>> {
     let operation = &endpoint.operation;
     let mut imports = BTreeSet::new();
     let mut path_parameters = Vec::new();
     let mut query_parameters = Vec::new();
+    let mut parameters = Vec::new();
     for parameter in &endpoint.parameters {
+        if exclude_deprecated_operations && parameter.deprecated && parameter.location != "path" {
+            continue;
+        }
         let expected_style = match parameter.location.as_str() {
             "path" => "simple",
             "query" => "form",
@@ -115,7 +159,13 @@ fn build_operation<'a>(
             name: parameter.name.clone(),
             type_expression: types.expression(&parameter.schema, &mut imports)?,
             optional: !parameter.required,
+            deprecated: parameter.deprecated,
+            description: parameter.description.clone(),
         };
+        parameters.push(ClientParameter {
+            location: parameter.location.clone(),
+            field: field.clone(),
+        });
         if expected_style == "simple" {
             ensure!(
                 parameter.required,
@@ -127,6 +177,8 @@ fn build_operation<'a>(
             query_parameters.push(field);
         }
     }
+    path_parameters.sort_by(|left, right| left.name.cmp(&right.name));
+    query_parameters.sort_by(|left, right| left.name.cmp(&right.name));
     check_path_parameters(endpoint.path, &path_parameters)?;
 
     let body_type = operation
@@ -141,7 +193,21 @@ fn build_operation<'a>(
             types.expression(crate::openapi::json_schema(&body.content)?, &mut imports)
         })
         .transpose()?;
-    let responses = responses(endpoint, types, event_type, &mut imports)?;
+    let responses = responses(endpoint, types, event_type)?;
+    for response in &responses {
+        if response.kind != "sse" {
+            imports.extend(response.imports.iter().cloned());
+        }
+    }
+    let all_responses = operation
+        .responses
+        .iter()
+        .map(|(status, response)| ResponseSummary {
+            status: status.clone(),
+            description: response.description.clone(),
+            media_types: response.content.keys().cloned().collect(),
+        })
+        .collect();
     let return_types: BTreeSet<_> = responses
         .iter()
         .map(|response| response.type_expression.as_str())
@@ -168,11 +234,16 @@ fn build_operation<'a>(
     let security = credentials(&endpoint.security, schemes, &query_parameters)?;
     Ok(ClientOperation {
         id,
+        raw_id: operation.operation_id.clone(),
+        tags: operation.tags.clone(),
+        deprecated: operation.deprecated,
+        description: operation.description.clone(),
         imports,
         method: endpoint.method.to_ascii_uppercase(),
         path: endpoint.path,
         path_parameters,
         query_parameters,
+        parameters,
         body_type,
         body_optional: operation
             .request_body
@@ -180,6 +251,7 @@ fn build_operation<'a>(
             .is_some_and(|body| !body.required),
         response_type,
         responses,
+        all_responses,
         accept,
         security,
         summary: operation.summary.clone(),
@@ -223,7 +295,6 @@ fn responses(
     endpoint: &Endpoint<'_>,
     types: &SchemaTypes<'_>,
     event_type: &str,
-    imports: &mut BTreeSet<ModelImport>,
 ) -> Result<Vec<ClientResponse>> {
     let mut responses = Vec::new();
     for (code, response) in endpoint.operation.success_responses() {
@@ -237,6 +308,12 @@ fn responses(
             kind: "void",
             type_expression: "void".into(),
             media_type: None,
+            wire_type: None,
+            wire_schema_type: None,
+            schema_name: None,
+            description: response.description.clone(),
+            imports: BTreeSet::new(),
+            envelope_property: None,
         };
         if !response.content.is_empty() {
             ensure!(
@@ -252,21 +329,34 @@ fn responses(
                 .first_key_value()
                 .context("response media type missing")?;
             result.media_type = Some(media_type.clone());
-            match media_type.as_str() {
-                "text/event-stream" => {
-                    result.kind = "sse";
-                    result.type_expression = format!("globalThis.AsyncIterable<{event_type}>");
-                }
-                media_type if is_json(media_type) => {
-                    result.kind = "json";
-                    let schema = media
-                        .schema
-                        .as_ref()
-                        .with_context(|| format!("HTTP {code}: JSON response requires a schema"))?;
-                    result.type_expression = types.expression(schema, imports)?;
-                }
+            result.kind = match media_type.as_str() {
+                "text/event-stream" => "sse",
+                media_type if is_json(media_type) => "json",
                 _ => bail!("HTTP {code}: unsupported success media type {media_type:?}"),
+            };
+            if let Some(schema) = &media.schema {
+                result.wire_schema_type = schema.kind.clone();
+                result.schema_name = types
+                    .reference_import(schema)
+                    .map(|reference| reference.name.clone());
+                result.envelope_property = types.envelope_property(schema);
+                // Preserve a conventional Swagger spelling where event payloads were
+                // already accepted as opaque because the transport supplies the type.
+                let wire_type = if result.kind == "sse" && schema.kind.as_deref() == Some("Object")
+                {
+                    "unknown".into()
+                } else {
+                    types.expression(schema, &mut result.imports)?
+                };
+                result.wire_type = Some(wire_type);
             }
+            result.type_expression = match result.kind {
+                "sse" => format!("globalThis.AsyncIterable<{event_type}>"),
+                _ => result
+                    .wire_type
+                    .clone()
+                    .with_context(|| format!("HTTP {code}: JSON response requires a schema"))?,
+            };
         }
         responses.push(result);
     }

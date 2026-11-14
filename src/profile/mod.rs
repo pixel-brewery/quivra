@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::typescript::{ContextData, valid_identifier};
+use crate::typescript::{ContextData, Model, ProjectionOptions, Service, valid_identifier};
 pub use output::FilePlan;
 
 #[derive(Deserialize)]
@@ -22,7 +22,11 @@ struct Manifest {
     #[serde(default)]
     model_files: Vec<ModelFiles>,
     #[serde(default)]
-    typescript: TypeScriptOptions,
+    service_files: Vec<ServiceFiles>,
+    #[serde(default, deserialize_with = "unique_file_map")]
+    batch_files: BTreeMap<String, String>,
+    #[serde(default)]
+    typescript: ProjectionOptions,
     #[serde(default)]
     options: BTreeMap<String, Value>,
 }
@@ -31,15 +35,19 @@ pub struct Profile {
     root: PathBuf,
     files: BTreeMap<String, String>,
     model_files: Vec<ModelFiles>,
-    pub typescript: TypeScriptOptions,
+    service_files: Vec<ServiceFiles>,
+    batch_files: BTreeMap<String, String>,
+    pub typescript: ProjectionOptions,
     pub options: BTreeMap<String, Value>,
 }
 
-#[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct TypeScriptOptions {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ServiceFiles {
+    directory: String,
+    template: String,
     #[serde(default)]
-    pub interface_prefix: String,
+    suffix: String,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +70,21 @@ pub enum Starter {
     Transport,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Document {
+    pub namespace: String,
+    pub directory: String,
+    #[serde(skip_serializing)]
+    pub spec: PathBuf,
+}
+
+enum TemplateScope<'a> {
+    Document,
+    Model(&'a Model),
+    Service(&'a Service<'a>),
+}
+
 impl Profile {
     pub fn load(path: &Path) -> Result<Self> {
         let path = if path.is_dir() {
@@ -81,44 +104,29 @@ impl Profile {
             manifest.version
         );
         ensure!(
-            !(manifest.files.is_empty() && manifest.model_files.is_empty()),
+            !(manifest.files.is_empty()
+                && manifest.model_files.is_empty()
+                && manifest.service_files.is_empty()),
             "profile must declare at least one output file"
         );
-        validate_paths(manifest.files.keys().map(String::as_str))?;
-        for (output, template) in &manifest.files {
-            ensure!(
-                !output::is_reserved(output),
-                "reserved output path {output:?}"
-            );
-            ensure!(is_relative(template), "invalid template path {template:?}");
-        }
+        validate_file_rules(&manifest.files)?;
+        validate_file_rules(&manifest.batch_files)?;
         let mut kinds = BTreeSet::new();
         for rule in &manifest.model_files {
             ensure!(
                 kinds.insert(rule.kind),
                 "duplicate modelFiles rule for one model kind"
             );
+            validate_directory_rule(&rule.directory, &rule.template)?;
+        }
+        for rule in &manifest.service_files {
+            validate_directory_rule(&rule.directory, &rule.template)?;
             ensure!(
-                is_relative(&rule.directory),
-                "invalid model directory {:?}",
-                rule.directory
-            );
-            ensure!(
-                !output::is_reserved(&rule.directory),
-                "reserved model directory {:?}",
-                rule.directory
-            );
-            ensure!(
-                is_relative(&rule.template),
-                "invalid model template {:?}",
-                rule.template
+                valid_identifier(&format!("Service{}", rule.suffix)),
+                "invalid TypeScript service suffix {:?}",
+                rule.suffix
             );
         }
-        let prefix = &manifest.typescript.interface_prefix;
-        ensure!(
-            prefix.is_empty() || valid_identifier(prefix),
-            "invalid TypeScript interface prefix {prefix:?}"
-        );
         Ok(Self {
             root: path
                 .parent()
@@ -126,12 +134,76 @@ impl Profile {
                 .to_owned(),
             files: manifest.files,
             model_files: manifest.model_files,
+            service_files: manifest.service_files,
+            batch_files: manifest.batch_files,
             typescript: manifest.typescript,
             options: manifest.options,
         })
     }
 
     pub fn render(&self, context: &ContextData<'_>) -> Result<FilePlan> {
+        Ok(FilePlan::new(
+            self.render_document(&self.environment(), context)?,
+        ))
+    }
+
+    pub fn render_batch(
+        &self,
+        documents: &[Document],
+        reference_root: Option<&Path>,
+    ) -> Result<FilePlan> {
+        ensure!(!documents.is_empty(), "generation batch has no documents");
+        let mut namespaces = BTreeSet::new();
+        let mut directories = BTreeSet::new();
+        for document in documents {
+            ensure!(
+                valid_identifier(&document.namespace),
+                "invalid document namespace {:?}",
+                document.namespace
+            );
+            ensure!(
+                namespaces.insert(&document.namespace),
+                "duplicate document namespace {:?}",
+                document.namespace
+            );
+            ensure!(
+                directories.insert(document.directory.to_ascii_lowercase()),
+                "duplicate document directory {:?}",
+                document.directory
+            );
+            ensure!(
+                is_relative(&document.directory)
+                    && !document.directory.contains('/')
+                    && !output::is_reserved(&document.directory),
+                "invalid document directory {:?}",
+                document.directory
+            );
+        }
+        let environment = self.environment();
+        let mut files = BTreeMap::new();
+        let batch = minijinja::context! { documents => documents, options => &self.options };
+        for (output, template) in &self.batch_files {
+            files.insert(
+                output.clone(),
+                render(&environment, template, output, batch.clone())?,
+            );
+        }
+        for document in documents {
+            let api = crate::openapi::load(&document.spec, reference_root)?;
+            let context = crate::typescript::context(&api, &self.options, &self.typescript)?;
+            for (output, contents) in self.render_document(&environment, &context)? {
+                let path = format!("{}/{output}", document.directory);
+                ensure!(
+                    files.insert(path.clone(), contents).is_none(),
+                    "output paths collide: {path:?}"
+                );
+            }
+        }
+        validate_paths(files.keys().map(String::as_str))?;
+        Ok(FilePlan::new(files))
+    }
+
+    fn environment(&self) -> Environment<'static> {
         let mut environment = Environment::new();
         environment.set_undefined_behavior(UndefinedBehavior::Strict);
         environment.set_auto_escape_callback(|_| AutoEscape::None);
@@ -172,12 +244,19 @@ impl Profile {
                 .map(Some)
                 .map_err(|error| template_error(format!("{name}: {error}")))
         });
+        environment
+    }
 
+    fn render_document(
+        &self,
+        environment: &Environment<'_>,
+        context: &ContextData<'_>,
+    ) -> Result<BTreeMap<String, String>> {
         let base = minijinja::Value::from_serialize(context);
         let mut outputs = self
             .files
             .iter()
-            .map(|(path, template)| (path.clone(), (template.as_str(), None)))
+            .map(|(path, template)| (path.clone(), (template.as_str(), TemplateScope::Document)))
             .collect::<BTreeMap<_, _>>();
 
         for model in context.models() {
@@ -192,26 +271,80 @@ impl Profile {
                     !outputs.contains_key(&path),
                     "output paths collide: {path:?}"
                 );
-                outputs.insert(path, (rule.template.as_str(), Some(model)));
+                outputs.insert(path, (rule.template.as_str(), TemplateScope::Model(model)));
+            }
+        }
+        for service in context.services() {
+            for rule in &self.service_files {
+                let path = format!(
+                    "{}/{}{}.ts",
+                    rule.directory,
+                    service.type_name(),
+                    rule.suffix
+                );
+                ensure!(
+                    !outputs.contains_key(&path),
+                    "output paths collide for service {:?}: {path:?}",
+                    service.name()
+                );
+                outputs.insert(
+                    path,
+                    (rule.template.as_str(), TemplateScope::Service(service)),
+                );
             }
         }
 
         validate_paths(outputs.keys().map(String::as_str))?;
         ensure!(!outputs.is_empty(), "profile did not generate any files");
         let mut files = BTreeMap::new();
-        for (output, (template, model)) in outputs {
-            let value = match model {
-                Some(model) => minijinja::context! { model => model, ..base.clone() },
-                None => base.clone(),
+        for (output, (template, scope)) in outputs {
+            let value = match scope {
+                TemplateScope::Document => base.clone(),
+                TemplateScope::Model(model) => {
+                    minijinja::context! { model => model, ..base.clone() }
+                }
+                TemplateScope::Service(service) => {
+                    minijinja::context! { service => service, ..base.clone() }
+                }
             };
-            let contents = environment
-                .get_template(template)
-                .and_then(|template| template.render(value))
-                .with_context(|| format!("render {template:?} for {output:?}"))?;
+            let contents = render(environment, template, &output, value)?;
             files.insert(output, contents);
         }
-        Ok(FilePlan::new(files))
+        Ok(files)
     }
+}
+
+fn render(
+    environment: &Environment<'_>,
+    template: &str,
+    output: &str,
+    value: minijinja::Value,
+) -> Result<String> {
+    environment
+        .get_template(template)
+        .and_then(|template| template.render(value))
+        .with_context(|| format!("render {template:?} for {output:?}"))
+}
+
+fn validate_file_rules(rules: &BTreeMap<String, String>) -> Result<()> {
+    validate_paths(rules.keys().map(String::as_str))?;
+    for (output, template) in rules {
+        ensure!(
+            !output::is_reserved(output),
+            "reserved output path {output:?}"
+        );
+        ensure!(is_relative(template), "invalid template path {template:?}");
+    }
+    Ok(())
+}
+
+fn validate_directory_rule(directory: &str, template: &str) -> Result<()> {
+    ensure!(
+        is_relative(directory) && !output::is_reserved(directory),
+        "invalid output directory {directory:?}"
+    );
+    ensure!(is_relative(template), "invalid template path {template:?}");
+    Ok(())
 }
 
 impl Starter {

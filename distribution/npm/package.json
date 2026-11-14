@@ -30,7 +30,7 @@
     "url": "https://github.com/pixel-brewery/quivra/issues"
   },
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
+    "registry": "https://npm.pkg.github.com",
     "access": "public"
   }
 }

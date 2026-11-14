@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
+use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::references::{Documents, Location, escape_token};
@@ -42,6 +43,21 @@ pub(super) fn load(path: &Path, reference_root: Option<&Path>) -> Result<Api> {
         .transpose()
         .context("invalid API security requirements")?
         .unwrap_or_default();
+    #[derive(Deserialize)]
+    struct Tag {
+        name: String,
+        description: Option<String>,
+    }
+
+    let tags = object(&mut document)?
+        .remove("tags")
+        .map(serde_json::from_value::<Vec<Tag>>)
+        .transpose()
+        .context("invalid API tags")?
+        .unwrap_or_default()
+        .into_iter()
+        .map(|tag| (tag.name, tag.description))
+        .collect();
     let component_keys = match document.pointer("/components/schemas") {
         Some(Value::Object(schemas)) => schemas.keys().cloned().collect::<Vec<_>>(),
         Some(_) => bail!("components.schemas must be an object"),
@@ -81,6 +97,7 @@ pub(super) fn load(path: &Path, reference_root: Option<&Path>) -> Result<Api> {
     Ok(Api {
         info,
         components,
+        tags,
         paths,
         security,
     })
