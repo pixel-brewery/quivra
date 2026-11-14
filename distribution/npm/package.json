@@ -4,18 +4,20 @@
   "description": "Template-driven OpenAPI client generation",
   "type": "module",
   "bin": {
-    "quivra": "./bin/quivra.mjs"
+    "quivra": "./dist/bin/quivra.js"
   },
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
-      "import": "./src/index.mjs"
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
     }
   },
-  "types": "./src/index.d.ts",
-  "files": ["bin", "src"],
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=26"
   },
   "repository": {
     "type": "git",

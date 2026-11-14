@@ -12,16 +12,19 @@ A profile controls the filenames and all the code written to them. For example, 
 
 ## Work on Quivra
 
-Install [Rust with rustup](https://rustup.rs/) and make sure `cargo` is on your PATH. The checked-in `rust-toolchain.toml` selects the compiler and installs the formatting and lint components. Node.js 24 is used for the generated-client and npm distribution tests.
+Install [Rust with rustup](https://rustup.rs/) and make sure `cargo` is on your PATH. The checked-in `rust-toolchain.toml` selects the compiler and installs the formatting and lint components. Node.js 26 is used for the generated-client and npm distribution tests.
 
 ```sh
+npm ci --ignore-scripts
+npm run check:types
+npm run check:examples
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo build --locked
 target/debug/quivra generate examples/openapi.yaml --profile examples/profiles/fetch --out examples/generated/fetch --check
 target/debug/quivra generate examples/openapi.yaml --profile examples/profiles/transport --out examples/generated/transport --check
-node examples/smoke.mjs
+node examples/smoke.ts
 ```
 
 When changing a profile or the generator, run both generation commands in the README and commit the generated files and their manifests. These files are fixtures for the CLI check and runtime tests.

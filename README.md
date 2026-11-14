@@ -6,13 +6,13 @@ This project is maintained by [Pixel Brewery](https://github.com/pixel-brewery).
 
 ## Try two clients from one spec
 
-Install [Rust with rustup](https://rustup.rs/) and Node.js 24, then run these commands from the repository root:
+Install [Rust with rustup](https://rustup.rs/) and Node.js 26, then run these commands from the repository root:
 
 ```sh
 cargo build --locked
 target/debug/quivra generate examples/openapi.yaml --profile examples/profiles/fetch --out examples/generated/fetch
 target/debug/quivra generate examples/openapi.yaml --profile examples/profiles/transport --out examples/generated/transport
-node examples/smoke.mjs
+node examples/smoke.ts
 ```
 
 | Profile | Output from the same [Widget API](examples/openapi.yaml) |

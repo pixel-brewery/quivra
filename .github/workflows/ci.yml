@@ -37,12 +37,20 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
           package-manager-cache: false
 
       - name: Check Architect inheritance
         if: runner.os == 'Linux'
         run: python3 .agents/scripts/sync_architect_core.py --check
+
+      - name: Install TypeScript tooling
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Check TypeScript tooling
+        run: |
+          npm run check:types
+          npm run test:automation
 
       - name: Check Rust formatting and lint
         run: |
@@ -59,11 +67,8 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then quivra="$quivra.exe"; fi
           "$quivra" generate examples/openapi.yaml --profile examples/profiles/fetch --out examples/generated/fetch --check
           "$quivra" generate examples/openapi.yaml --profile examples/profiles/transport --out examples/generated/transport --check
-          npm exec --yes --package typescript@7.0.2 -- tsc \
-            --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --noEmit \
-            --target ES2022 --module ESNext --lib ES2022,DOM \
-            examples/generated/fetch/client.ts examples/generated/transport/client.ts examples/generated/transport/routes.ts
-          node examples/smoke.mjs
+          npm run check:examples
+          node examples/smoke.ts
 
   quality-gate:
     name: Quality Gate

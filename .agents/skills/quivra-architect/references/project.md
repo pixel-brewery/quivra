@@ -11,7 +11,7 @@ Read [the architecture overview](../../../../docs/architecture.md) and the ownin
 
 ## Engineering and verification
 
-Use Cargo with the checked-in toolchain and lockfile. Prefer small fallible functions, typed inputs, path/operation context on errors, and deterministic ordering at persisted or serialized boundaries. Avoid panics on user-controlled input. Keep the Node package a thin process adapter. Put the general behavior in Rust or in project-owned templates as appropriate.
+Use Cargo with the checked-in toolchain and lockfile. Prefer small fallible functions, typed inputs, path/operation context on errors, and deterministic ordering at persisted or serialized boundaries. Avoid panics on user-controlled input. Keep the Node package a thin process adapter. Author Node tooling and wrappers in strict TypeScript, and use the Node 26 version in `.node-version`. Run repository scripts with Node type stripping. Compile the npm entry point and its declarations during packaging. Put the general behavior in Rust or in project-owned templates as appropriate.
 
 Keep unit tests beside the owning Rust module and CLI integration tests in `tests/`. Verify generated code with strict TypeScript and the fake-transport smoke test. A distribution change needs an actual packed install, launcher invocation and typed API check, as documented in the [distribution guide](../../../../docs/distribution.md). Respect the release authority in [AGENTS.md](../../../../AGENTS.md).
 

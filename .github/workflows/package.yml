@@ -19,10 +19,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
           package-manager-cache: false
       - id: matrix
-        run: echo "platforms=$(node distribution/prepare.mjs matrix)" >> "$GITHUB_OUTPUT"
+        run: echo "platforms=$(node distribution/prepare.ts matrix)" >> "$GITHUB_OUTPUT"
 
   package:
     needs: plan
@@ -44,9 +44,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version-file: .node-version
           architecture: ${{ matrix.cpu }}
           package-manager-cache: false
+      - name: Install the pinned compiler
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build the native executable
         run: |
           rustup target add "$RUST_TARGET"
@@ -57,14 +59,14 @@ jobs:
           if [[ "$OS_NAME" == "win32" ]]; then binary=quivra.exe; fi
           staging=target/distribution
           mkdir -p "$staging/artifacts"
-          node distribution/prepare.mjs native "$RUST_TARGET" "target/$RUST_TARGET/release/$binary" "$staging/native"
-          node distribution/prepare.mjs launcher "$staging/launcher"
+          node distribution/prepare.ts native "$RUST_TARGET" "target/$RUST_TARGET/release/$binary" "$staging/native"
+          node distribution/prepare.ts launcher "$staging/launcher"
           version=$(node -p 'require("./target/distribution/launcher/package.json").version')
           npm pack "./$staging/native" --ignore-scripts --pack-destination "$staging/artifacts"
           npm pack "./$staging/launcher" --ignore-scripts --pack-destination "$staging/artifacts"
           asset="quivra-$version-$RUST_TARGET.tar.gz"
           tar -C "$staging/native" -czf "$staging/artifacts/$asset" "$binary"
-          node distribution/checksum.mjs "$staging/artifacts/$asset"
+          node distribution/checksum.ts "$staging/artifacts/$asset"
           printf 'PACKAGE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
       - name: Test the installed npm CLI and Node API
         run: |
@@ -76,14 +78,14 @@ jobs:
             "../artifacts/$NATIVE_TARBALL-$PACKAGE_VERSION.tgz" \
             "../artifacts/pixel-brewery-quivra-$PACKAGE_VERSION.tgz"
           test "$(npm exec --offline -- quivra --version)" = "quivra $PACKAGE_VERSION"
-          cp ../../../distribution/smoke.mjs .
-          node smoke.mjs ../../..
+          cp ../../../distribution/smoke.ts .
+          node smoke.ts ../../..
       - name: Type-check the installed Node API
         if: matrix.os == 'linux' && matrix.cpu == 'x64'
         working-directory: target/distribution/smoke
         run: |
           cp ../../../distribution/npm-api.types.ts .
-          npm exec --yes --package typescript@7.0.2 -- tsc --strict --noEmit --target ES2022 --module NodeNext npm-api.types.ts
+          node ../../../node_modules/typescript/bin/tsc --ignoreConfig --strict --noEmit --target ES2022 --module NodeNext npm-api.types.ts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quivra-${{ matrix.target }}

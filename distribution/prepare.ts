@@ -1,13 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { chmod, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { binaryPackageName } from "./npm/src/platform-package.mjs";
-import { platforms } from "./platforms.mjs";
+import { binaryPackageName } from "./npm/src/platform-package.ts";
+import { platforms } from "./platforms.ts";
+
+import { compileLauncher } from "./compileLauncher.ts";
+import { readLauncherManifest } from "./readLauncherManifest.ts";
 
 const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
-const npmSource = join(sourceRoot, "distribution", "npm");
-const launcher = JSON.parse(await readFile(join(npmSource, "package.json"), "utf8"));
+const launcher = await readLauncherManifest();
 const [command, targetOrOutput, binaryArgument, nativeOutput, ...extra] = process.argv.slice(2);
 const npmPlatforms = platforms.map((platform) => {
     const npmName = binaryPackageName(launcher.name, platform.os, platform.cpu);
@@ -18,19 +20,25 @@ const npmPlatforms = platforms.map((platform) => {
     };
 });
 
-async function writeManifest(output, manifest) {
+async function writeManifest(output: string, manifest: object) {
     await writeFile(join(output, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
 }
 
-function cargoVersion() {
-    const metadata = JSON.parse(execFileSync(
+function cargoVersion(): string {
+    const metadata: unknown = JSON.parse(execFileSync(
         "cargo",
         ["metadata", "--locked", "--no-deps", "--format-version", "1"],
         { cwd: sourceRoot, encoding: "utf8" },
     ));
-    const quivra = metadata.packages.find((entry) => entry.name === "quivra");
-    if (quivra === undefined) {
-        throw new Error("Cargo metadata has no Quivra package.");
+    if (!metadata || typeof metadata !== "object" || !("packages" in metadata) || !Array.isArray(metadata.packages)) {
+        throw new Error("Cargo returned invalid package metadata.");
+    }
+    const packages: unknown[] = metadata.packages;
+    const quivra = packages.find((entry) =>
+        entry !== null && typeof entry === "object" && "name" in entry && entry.name === "quivra",
+    );
+    if (!quivra || typeof quivra !== "object" || !("version" in quivra) || typeof quivra.version !== "string") {
+        throw new Error("Cargo metadata has no Quivra package version.");
     }
     return quivra.version;
 }
@@ -41,15 +49,14 @@ if (command === "matrix" && targetOrOutput === undefined) {
     const output = resolve(targetOrOutput);
     const version = cargoVersion();
     const optionalDependencies = Object.fromEntries(npmPlatforms.map((platform) => [platform.npm_name, version]));
-    const manifest = { ...launcher, version, optionalDependencies };
-    delete manifest.private;
+    const manifest = { ...launcher, version, optionalDependencies, private: undefined };
 
     await mkdir(output, { recursive: true });
-    await cp(join(npmSource, "bin"), join(output, "bin"), { recursive: true });
-    await cp(join(npmSource, "src"), join(output, "src"), { recursive: true });
+    compileLauncher(join(output, "dist"));
+    await chmod(join(output, "dist", "bin", "quivra.js"), 0o755);
     await copyFile(join(sourceRoot, "docs", "distribution.md"), join(output, "README.md"));
     await writeManifest(output, manifest);
-} else if (command === "native" && nativeOutput !== undefined && extra.length === 0) {
+} else if (command === "native" && binaryArgument !== undefined && nativeOutput !== undefined && extra.length === 0) {
     const platform = npmPlatforms.find((entry) => entry.target === targetOrOutput);
     if (platform === undefined) {
         throw new Error(`Unknown Rust release target ${targetOrOutput}.`);
@@ -87,9 +94,9 @@ if (command === "matrix" && targetOrOutput === undefined) {
     await writeManifest(output, manifest);
 } else {
     console.error(
-        "Usage: node distribution/prepare.mjs matrix\n" +
-        "       node distribution/prepare.mjs launcher <output-directory>\n" +
-        "       node distribution/prepare.mjs native <rust-target> <binary> <output-directory>",
+        "Usage: node distribution/prepare.ts matrix\n" +
+        "       node distribution/prepare.ts launcher <output-directory>\n" +
+        "       node distribution/prepare.ts native <rust-target> <binary> <output-directory>",
     );
     process.exitCode = 1;
 }

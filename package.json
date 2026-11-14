@@ -1,0 +1,15 @@
+{
+  "name": "quivra-tooling",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "26.x" },
+  "scripts": {
+    "check:types": "tsc --project tsconfig.json",
+    "check:examples": "tsc --project examples/tsconfig.json",
+    "test:automation": "node --test .github/scripts/mergeDependabotPullRequest.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  }
+}

@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 
 const path = process.argv[2];
+if (!path) throw new Error("Usage: node distribution/checksum.ts ARCHIVE");
 const hash = createHash("sha256");
 for await (const chunk of createReadStream(path)) {
     hash.update(chunk);

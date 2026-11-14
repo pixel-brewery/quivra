@@ -1,6 +1,6 @@
 # Distributing Quivra
 
-Quivra runs as a native command-line executable. The npm package adds a small Node launcher and an optional JavaScript API with TypeScript declarations. Both use the same executable.
+Quivra runs as a native command-line executable. The npm package adds a small Node launcher and an optional JavaScript API with TypeScript declarations. Both use the same executable. Node.js 26 runs the repository’s TypeScript build tools. npm installs the launcher as compiled ESM JavaScript with generated declaration files.
 
 ## GitHub builds
 
@@ -60,15 +60,16 @@ Set up the publisher when the first OIDC release is ready to run. npm expires a 
 
 ## Build a package locally
 
-With Rust and Node.js 22.18 or later on a listed platform, prepare the current host's launchable packages from the repository root:
+With Rust and Node.js 26 on a listed platform, prepare the current host's launchable packages from the repository root:
 
 ```sh
+npm ci --ignore-scripts
 cargo build --locked --release
 target=$(rustc -vV | sed -n 's/^host: //p')
 binary=target/release/quivra
 case "$target" in *windows*) binary="$binary.exe";; esac
-node distribution/prepare.mjs native "$target" "$binary" target/distribution/native
-node distribution/prepare.mjs launcher target/distribution/launcher
+node distribution/prepare.ts native "$target" "$binary" target/distribution/native
+node distribution/prepare.ts launcher target/distribution/launcher
 mkdir -p target/distribution/artifacts
 npm pack ./target/distribution/native ./target/distribution/launcher --ignore-scripts --pack-destination target/distribution/artifacts
 ```
