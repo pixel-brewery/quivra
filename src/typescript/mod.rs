@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use anyhow::{Result, ensure};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -14,18 +15,28 @@ use operations::ClientOperation;
 pub(crate) use schemas::Model;
 use schemas::{ModelImport, SchemaTypes};
 
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub(crate) struct ProjectionOptions {
+    /// Prefix for generated interface names and references.
     pub interface_prefix: String,
+    /// Prefix for generated type alias names and references.
     pub type_alias_prefix: String,
+    /// Keep only models reachable from operations.
     pub ignore_unused_models: bool,
+    /// Omit deprecated operations and query parameters.
     pub exclude_deprecated_operations: bool,
+    /// Keep explicit OpenAPI 3.0 nullable annotations in the projection.
     pub preserve_nullable_annotations: bool,
+    /// Include extra HTTP parameter and media types for templates to handle.
     pub broad_http: bool,
+    /// Expose eligible named enums as enum models.
     pub enum_objects: bool,
+    /// Keep object models with additional properties as interfaces with index signatures.
     pub object_index_interfaces: bool,
+    /// Remove this exact suffix from OpenAPI tags when deriving service names.
     pub strip_service_tag_suffix: String,
+    /// Project validation schemas and actions for components marked x-assistant-action.
     pub runtime_contracts: bool,
 }
 

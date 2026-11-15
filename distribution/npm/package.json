@@ -11,11 +11,14 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
-    }
+    },
+    "./schemas/profile.schema.json": "./schemas/profile.schema.json",
+    "./schemas/batch.schema.json": "./schemas/batch.schema.json"
   },
   "types": "./dist/src/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "engines": {
     "node": ">=26"

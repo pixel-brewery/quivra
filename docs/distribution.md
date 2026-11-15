@@ -48,6 +48,8 @@ await generate({ ...options, out: "src/api", check: true });
 
 Use `generateBatch({ batch, profile, out })` with a JSON [batch manifest](https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md#generating-multiple-documents) to generate several clients and a shared index in one run. Set `check: true` to test the complete output for drift.
 
+The package exports the configuration schemas at `@pixel-brewery/quivra/schemas/profile.schema.json` and `@pixel-brewery/quivra/schemas/batch.schema.json`. Use their installed files for [editor validation](https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md#editor-validation), or print them with `quivra schema profile` and `quivra schema batch`.
+
 ## First release
 
 Quivra is distributed under the MIT License. The npm tarballs and native release archives include the license.

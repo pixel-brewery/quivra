@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Quivra generation batch",
+  "type": "array",
+  "items": {
+    "$ref": "#/definitions/Document"
+  },
+  "minItems": 1,
+  "definitions": {
+    "Document": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "description": "TypeScript namespace for this document in the batch.",
+          "type": "string",
+          "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"
+        },
+        "directory": {
+          "description": "Name of a single output directory below the batch root.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.$-]*[A-Za-z0-9_$-]$"
+        },
+        "spec": {
+          "description": "OpenAPI file path, either absolute or relative to the batch manifest.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "directory",
+        "spec"
+      ]
+    }
+  }
+}

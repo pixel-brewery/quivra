@@ -29,6 +29,13 @@ node examples/smoke.ts
 
 When changing a profile or the generator, run both generation commands in the README and commit the generated files and their manifests. These files are fixtures for the CLI check and runtime tests.
 
+When changing the profile or batch input types, regenerate the schemas from the built CLI. The CLI tests compare them with the files shipped in the npm package.
+
+```sh
+target/debug/quivra schema profile > schemas/profile.schema.json
+target/debug/quivra schema batch > schemas/batch.schema.json
+```
+
 ## Output behavior
 
 Use a dedicated directory for each generation. Generation renders the complete plan before changing any generated file. It serializes writers to the same output directory, stages changed files, replaces each file individually and records the new inventory. A journal allows a failed write to continue with the same inputs. Keep the manifest with the generated files, including in source control if the outputs are tracked.

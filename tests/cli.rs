@@ -49,6 +49,22 @@ fn write_profile(root: &Path, files: &str) {
 }
 
 #[test]
+fn packaged_configuration_schemas_match_the_cli() {
+    for kind in ["profile", "batch"] {
+        let output = cli(&["schema", kind]);
+        let generated = serde_json::from_slice::<serde_json::Value>(&output.stdout);
+        success(output);
+        let path = format!("schemas/{kind}.schema.json");
+        let packaged = fs::read(&path).unwrap();
+        assert_eq!(
+            generated.unwrap(),
+            serde_json::from_slice::<serde_json::Value>(&packaged).unwrap(),
+            "regenerate {path} with quivra schema {kind}"
+        );
+    }
+}
+
+#[test]
 fn starter_profiles_are_editable_and_never_overwrite_templates() {
     let staging = tempdir().unwrap();
     for preset in ["fetch", "transport"] {
@@ -165,7 +181,7 @@ fn batch_validates_every_document_before_updating_owned_files() {
     fs::copy("examples/openapi.yaml", root.join("api.yaml")).unwrap();
     fs::write(
         root.join("profile.json"),
-        r#"{"version":1,"files":{"client.ts":"client.jinja"},"batchFiles":{"index.ts":"index.jinja"},"serviceFiles":[{"directory":"services","suffix":"Client","template":"service.jinja"}]}"#,
+        r#"{"$schema":"./profile.schema.json","version":1,"files":{"client.ts":"client.jinja"},"batchFiles":{"index.ts":"index.jinja"},"serviceFiles":[{"directory":"services","suffix":"Client","template":"service.jinja"}]}"#,
     )
     .unwrap();
     fs::write(root.join("client.jinja"), "{{ api.title }}\n").unwrap();

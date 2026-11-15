@@ -7,6 +7,7 @@ import { platforms } from "./platforms.ts";
 
 import { compileLauncher } from "./compileLauncher.ts";
 import { readLauncherManifest } from "./readLauncherManifest.ts";
+import { schemaFiles } from "./schema-files.ts";
 
 const sourceRoot = fileURLToPath(new URL("../", import.meta.url));
 const launcher = await readLauncherManifest();
@@ -54,6 +55,11 @@ if (command === "matrix" && targetOrOutput === undefined) {
     await mkdir(output, { recursive: true });
     compileLauncher(join(output, "dist"));
     await chmod(join(output, "dist", "bin", "quivra.js"), 0o755);
+    const schemaOutput = join(output, "schemas");
+    await mkdir(schemaOutput, { recursive: true });
+    for (const file of schemaFiles) {
+        await copyFile(join(sourceRoot, "schemas", file), join(schemaOutput, file));
+    }
     await copyFile(join(sourceRoot, "docs", "distribution.md"), join(output, "README.md"));
     await copyFile(join(sourceRoot, "LICENSE"), join(output, "LICENSE"));
     await writeManifest(output, manifest);

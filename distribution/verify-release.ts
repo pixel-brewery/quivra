@@ -10,6 +10,7 @@ import { binaryPackageName } from "./npm/src/platform-package.ts";
 import { platforms } from "./platforms.ts";
 import { compileLauncher } from "./compileLauncher.ts";
 import { readLauncherManifest } from "./readLauncherManifest.ts";
+import { schemaFiles } from "./schema-files.ts";
 
 const packageRegistry = "https://npm.pkg.github.com";
 const githubApi = "https://api.github.com";
@@ -78,6 +79,9 @@ async function launcherEntries(license: Buffer): Promise<Map<string, Buffer>> {
             ["package/README.md", await readFile(join(distribution, "..", "docs", "distribution.md"))],
             ["package/LICENSE", license],
         ]);
+        for (const file of schemaFiles) {
+            entries.set(`package/schemas/${file}`, await readFile(join(distribution, "..", "schemas", file)));
+        }
         for (const file of files) {
             if (file.isDirectory()) continue;
             const path = join(file.parentPath, file.name);

@@ -1,4 +1,5 @@
 mod output;
+mod schema;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -7,26 +8,44 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::typescript::{ContextData, Model, ProjectionOptions, Service, valid_identifier};
 pub use output::FilePlan;
+pub use schema::{batch_schema, profile_schema};
 
-#[derive(Deserialize)]
+const PROFILE_VERSION: u32 = 1;
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(title = "Quivra profile", transform = schema::require_output)]
 struct Manifest {
+    /// Format version of this profile.
+    #[schemars(schema_with = "schema::profile_version")]
     version: u32,
+    /// Optional editor schema reference.
+    #[serde(default, rename = "$schema")]
+    _schema: String,
+    /// Output paths mapped to template paths relative to this profile.
     #[serde(deserialize_with = "unique_file_map")]
+    #[schemars(transform = schema::file_map)]
     files: BTreeMap<String, String>,
+    /// Templates for individual TypeScript models, by model kind.
     #[serde(default)]
     model_files: Vec<ModelFiles>,
+    /// Templates for individual OpenAPI services.
     #[serde(default)]
     service_files: Vec<ServiceFiles>,
+    /// Output paths and templates for files written at the batch root.
     #[serde(default, deserialize_with = "unique_file_map")]
+    #[schemars(transform = schema::file_map)]
     batch_files: BTreeMap<String, String>,
+    /// Settings for projecting OpenAPI into the template context.
     #[serde(default)]
     typescript: ProjectionOptions,
+    /// Project-defined JSON values exposed to templates as options.
     #[serde(default)]
     options: BTreeMap<String, Value>,
 }
@@ -41,24 +60,30 @@ pub struct Profile {
     pub options: BTreeMap<String, Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ServiceFiles {
+    #[schemars(regex(pattern = schema::RELATIVE_PATH))]
     directory: String,
+    #[schemars(regex(pattern = schema::RELATIVE_PATH))]
     template: String,
+    /// Suffix appended to the generated service name.
     #[serde(default)]
+    #[schemars(regex(pattern = r"^[A-Za-z0-9_$]*$"))]
     suffix: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ModelFiles {
     kind: ModelKind,
+    #[schemars(regex(pattern = schema::RELATIVE_PATH))]
     directory: String,
+    #[schemars(regex(pattern = schema::RELATIVE_PATH))]
     template: String,
 }
 
-#[derive(Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Deserialize, Eq, JsonSchema, Ord, PartialEq, PartialOrd)]
 #[serde(rename_all = "lowercase")]
 enum ModelKind {
     Interface,
@@ -71,12 +96,18 @@ pub enum Starter {
     Transport,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, JsonSchema, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    /// TypeScript namespace for this document in the batch.
+    #[schemars(regex(pattern = r"^[A-Za-z_$][A-Za-z0-9_$]*$"))]
     pub namespace: String,
+    /// Name of a single output directory below the batch root.
+    #[schemars(regex(pattern = r"^[A-Za-z0-9_.$-]*[A-Za-z0-9_$-]$"))]
     pub directory: String,
+    /// OpenAPI file path, either absolute or relative to the batch manifest.
     #[serde(skip_serializing)]
+    #[schemars(!skip_serializing)]
     pub spec: PathBuf,
 }
 
@@ -100,7 +131,7 @@ impl Profile {
         let manifest: Manifest = serde_json::from_slice(&contents)
             .with_context(|| format!("parse {}", path.display()))?;
         ensure!(
-            manifest.version == 1,
+            manifest.version == PROFILE_VERSION,
             "unsupported profile version {}",
             manifest.version
         );

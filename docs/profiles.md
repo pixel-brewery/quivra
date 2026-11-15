@@ -2,6 +2,27 @@
 
 A profile is a JSON manifest and its MiniJinja templates. Copy either example or use `quivra init --preset fetch|transport --out <directory>`. Each file in the copy is yours to edit. `--profile` accepts either a directory with a `profile.json` or the path to a manifest.
 
+## Editor validation
+
+Quivra ships Draft 7 JSON Schemas in the npm package under `schemas/profile.schema.json` and `schemas/batch.schema.json`. With the native CLI, use `quivra schema profile` or `quivra schema batch` to print the corresponding schema. To use a local copy, run `quivra schema profile > profile.schema.json` beside your profile and add `"$schema": "./profile.schema.json"` to the profile JSON.
+
+The `$schema` value is an editor hint. A profile can also point to the installed npm file using a relative path from the profile to `node_modules`. The schema validates field names and types and accepts arbitrary JSON values inside `options`. Quivra checks template and OpenAPI file resolution, duplicate names, and output path collisions during generation.
+
+Batch manifests use an array. In VS Code, associate the schema by filename in `.vscode/settings.json`.
+
+```json
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["**/batch.json"],
+      "url": "./node_modules/@pixel-brewery/quivra/schemas/batch.schema.json"
+    }
+  ]
+}
+```
+
+## Manifest fields
+
 ```json
 {
   "version": 1,

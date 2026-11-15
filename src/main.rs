@@ -57,6 +57,11 @@ enum Command {
         #[command(flatten)]
         input: Input,
     },
+    /// Print the JSON Schema for a Quivra configuration file.
+    Schema {
+        #[arg(value_enum)]
+        kind: ConfigurationSchema,
+    },
 }
 
 #[derive(Args)]
@@ -75,6 +80,12 @@ struct Input {
 enum Preset {
     Fetch,
     Transport,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ConfigurationSchema {
+    Profile,
+    Batch,
 }
 
 fn main() -> Result<()> {
@@ -115,6 +126,13 @@ fn main() -> Result<()> {
             let profile = profile::Profile::load(&input.profile)?;
             let context = typescript::context(&api, &profile.options, &profile.typescript)?;
             println!("{}", serde_json::to_string_pretty(&context)?);
+        }
+        Command::Schema { kind } => {
+            let schema = match kind {
+                ConfigurationSchema::Profile => profile::profile_schema(),
+                ConfigurationSchema::Batch => profile::batch_schema(),
+            };
+            println!("{}", serde_json::to_string_pretty(&schema)?);
         }
     }
     Ok(())
