@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "language": "en",
+  "project": {
+    "name": "Quivra",
+    "slug": "quivra",
+    "website": "https://pixel-brewery.github.io/quivra/",
+    "repository": "https://github.com/pixel-brewery/quivra"
+  },
+  "description": "Quivra generates TypeScript clients from OpenAPI using project-owned MiniJinja templates.",
+  "image": {
+    "file": "project-card.webp",
+    "format": "webp",
+    "width": 960,
+    "height": 540,
+    "alt": "Quivra wordmark beside a folded ivory ceramic ribbon with lilac edging."
+  },
+  "icon": {
+    "file": "quivra-icon.png",
+    "format": "png",
+    "width": 512,
+    "height": 512,
+    "alt": "A dark purple Q with a lavender square at its center."
+  },
+  "artwork": {
+    "kind": "illustration",
+    "generator": "Built-in ImageGen",
+    "generatedOn": "2026-11-15",
+    "prompt": "Use case: precise-object-edit. Edit the full-width Quivra project cover in the attached local source. Keep exactly the word “Quivra” (same glyphs, black color, size, baseline, scale and position), the aubergine Q logo with lavender square above it (same exact geometry and position), the surrounding clean left-third negative space, warm white background and 16:9 canvas. Completely replace the crowded illustration at right. New art: a single continuous, broad ribbon of matte ivory ceramic, poised as three shallow accordion folds, with one restrained aubergine face and a lilac edge. Sculptural folded paper rendered as porcelain, elegant clean planes, subtly asymmetric, collected against soft grounded studio shadow. Three folds are one coherent object; no other objects. The whole sculpture occupies the right half, with breathing space around it. Preserve the white editorial palette. Do not draw the old panels, cloud, bracket, cables, protocol diagrams, code keycaps, arrows, extra lettering or wordmark. Think minimal design studio still life, elegantly reduced, no overt UI symbolism.",
+    "iconPrompt": "Use case: logo. A finished flat square product icon for Quivra on a true transparent background. A simple dark aubergine (#452a64) angular Q formed by one thick rounded-square open loop with an attached short diagonal tail at lower right, and one small lavender (#9b77d0) square centered in the negative space. The distinctive outline must read as a Q at 24px. Center the symbol with even generous transparent margins and precise, smooth edges. Just the mark, no wordmark, gradients, framing tile, textures, shadow, watermark, or lettering besides the symbol. Match the restraint of contemporary Pixel Brewery developer-tool app marks."
+  }
+}
