@@ -3,6 +3,11 @@ name: Package distributions
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      candidate_artifact_id:
+        type: string
+      release_commit:
+        type: string
 
 permissions:
   contents: read
@@ -47,6 +52,18 @@ jobs:
           node-version-file: .node-version
           architecture: ${{ matrix.cpu }}
           package-manager-cache: false
+      - name: Download the release candidate
+        if: inputs.candidate_artifact_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ inputs.candidate_artifact_id }}
+          path: ${{ runner.temp }}/quivra-candidate
+      - name: Check out the release candidate
+        if: inputs.candidate_artifact_id != '' || inputs.release_commit != ''
+        env:
+          CANDIDATE_DIR: ${{ runner.temp }}/quivra-candidate
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: node distribution/release-candidate.ts import "$CANDIDATE_DIR" "$GITHUB_SHA" "$RELEASE_COMMIT"
       - name: Install the pinned compiler
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build the native executable

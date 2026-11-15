@@ -4,20 +4,20 @@ Quivra runs as a native command-line executable. The npm package adds a small No
 
 ## GitHub builds
 
-Run **Package distributions** from the repository's Actions tab on the commit you intend to distribute. The workflow uploads one artifact per target with:
+Run **Package distributions** from the repository's Actions tab to build and inspect archives for a source commit. The workflow uploads these files in one artifact per target.
 
 - A native executable archive and its SHA-256 checksum.
 - An npm tarball for that target.
 
 The separate `quivra-npm` artifact contains the platform-independent `@pixel-brewery/quivra` npm tarball.
 
-The matrix covers Intel and Apple Silicon macOS, x64 and ARM64 Linux with glibc, and x64 and ARM64 Windows. The Linux builds use Ubuntu 22.04 runners. When requested, the release workflow attaches the native archive and checksum for each target to the GitHub Release. A downloaded archive contains the executable and can be used without Node or Rust. GitHub Releases are visible to people who can read the source repository. [GitHub Releases documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
+The matrix covers Intel and Apple Silicon macOS, x64 and ARM64 Linux with glibc, and x64 and ARM64 Windows. The Linux builds use Ubuntu 22.04 runners. The release workflow attaches the verified native archive and checksum for each target to the matching GitHub Release. A downloaded archive contains the executable and can be used without Node or Rust. GitHub Releases are visible to people who can read the source repository. [GitHub Releases documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 
 On Linux or macOS, verify and extract the chosen archive with `sha256sum -c <archive>.sha256` or `shasum -a 256 -c <archive>.sha256`, then `tar -xzf <archive>`. Windows includes `tar.exe` for extraction and PowerShell's `Get-FileHash -Algorithm SHA256 <archive>` for comparing the checksum.
 
 ## npm distribution
 
-The public package is `@pixel-brewery/quivra` on the GitHub Packages npm registry at `npm.pkg.github.com`. Its optional dependencies are pinned to the same Cargo version. macOS uses `@pixel-brewery/quivra-darwin-<arch>`, Linux uses `@pixel-brewery/quivra-linux-<arch>-gnu`, and Windows uses `@pixel-brewery/quivra-win32-<arch>-msvc`. Each native package declares the matching npm platform constraints. Keep optional dependencies enabled during installation. The packages have no lifecycle install scripts or separate binary downloads. [npm package manifest documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/)
+The public package is `@pixel-brewery/quivra` on the GitHub Packages npm registry at `npm.pkg.github.com`. Its optional dependencies are pinned to the same release version. macOS uses `@pixel-brewery/quivra-darwin-<arch>`, Linux uses `@pixel-brewery/quivra-linux-<arch>-gnu`, and Windows uses `@pixel-brewery/quivra-win32-<arch>-msvc`. Each native package declares the matching npm platform constraints. Keep optional dependencies enabled during installation. The packages have no lifecycle install scripts or separate binary downloads. [npm package manifest documentation](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/)
 
 After publication, configure the `@pixel-brewery` scope in the consuming project's `.npmrc`:
 
@@ -50,13 +50,13 @@ Use `generateBatch({ batch, profile, out })` with a JSON [batch manifest](https:
 
 The package exports the configuration schemas at `@pixel-brewery/quivra/schemas/profile.schema.json` and `@pixel-brewery/quivra/schemas/batch.schema.json`. Use their installed files for [editor validation](https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md#editor-validation), or print them with `quivra schema profile` and `quivra schema batch`.
 
-## First release
+## Package publication and visibility
 
 Quivra is distributed under the MIT License. The npm tarballs and native release archives include the license.
 
-Run **Release Quivra** from `main` with **publish** selected. Leave **github_release** unchecked for a packages-only publication. GitHub Packages initially creates each package with private visibility. After the first workflow upload, open the package settings for each of the six native packages and the launcher and set **Danger Zone → Change visibility → Public**. The organization must allow public packages. The workflow's public-package check lists the packages that still need their visibility changed. Once all seven are public, re-run the failed jobs from that same release run. [GitHub Packages visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-packages-for-an-organization)
+The **Release Quivra** workflow publishes the verified npm artifacts and the GitHub Release automatically from protected `main`. [Versioning and release workflow](https://github.com/pixel-brewery/quivra/blob/main/docs/ci-cd.md)
 
-For later versions, dispatch the release workflow from protected `main` and approve `release-main`. The job uses the repository's Actions token to publish the exact candidate tarballs. See [the CI/CD guide](https://github.com/pixel-brewery/quivra/blob/main/docs/ci-cd.md) for repository settings.
+GitHub Packages initially creates a new package with private visibility. If the workflow flags a new package, an authorized package administrator can set **Danger Zone → Change visibility → Public** in that package's settings. After the visibility change, re-run the failed jobs in the original release run. [GitHub Packages visibility settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-packages-for-an-organization)
 
 ## Build a package locally
 

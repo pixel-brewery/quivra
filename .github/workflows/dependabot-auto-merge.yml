@@ -24,6 +24,8 @@ jobs:
     concurrency:
       group: dependabot-merge-${{ github.event.workflow_run.head_branch }}
       cancel-in-progress: false
+    outputs:
+      merge_sha: ${{ steps.merge.outputs.sha }}
     permissions:
       actions: read
       contents: write
@@ -43,7 +45,51 @@ jobs:
           package-manager-cache: false
 
       - name: Squash merge the verified Dependabot head
+        id: merge
         env:
           GH_TOKEN: ${{ github.token }}
           QUIVRA_DEPENDABOT_AUTO_MERGE: ${{ vars.QUIVRA_DEPENDABOT_AUTO_MERGE }}
-        run: node .github/scripts/mergeDependabotPullRequest.ts
+        run: |
+          set -euo pipefail
+          result=$(node .github/scripts/mergeDependabotPullRequest.ts)
+          printf '%s\n' "$result"
+          sha=$(jq -er '
+            if .status == "skipped" then ""
+            elif .status == "merged" and (.sha | test("^[0-9a-f]{40}$")) then .sha
+            else error("Unexpected Dependabot merge result") end
+          ' <<< "$result")
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
+  request-release:
+    needs: merge
+    if: needs.merge.outputs.merge_sha != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: dependabot-release-${{ needs.merge.outputs.merge_sha }}
+      cancel-in-progress: false
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Request a release for the verified merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.merge.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          main=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [ "$main" != "$SOURCE_SHA" ]; then
+            echo 'A newer main commit supersedes this release request.'
+            exit 0
+          fi
+          workflow="repos/$GITHUB_REPOSITORY/actions/workflows/release.yml"
+          existing=$(gh api --method GET "$workflow/runs" -f branch=main -f head_sha="$SOURCE_SHA" \
+            --jq 'first(.workflow_runs[] | select(.display_title | startswith("Publish Quivra")) | .html_url) // ""')
+          if [ -n "$existing" ]; then
+            printf 'Release already requested. Retry the original run if it failed: %s\n' "$existing"
+            exit 0
+          fi
+          jq -n --arg sha "$SOURCE_SHA" '{ref:"main",inputs:{source_sha:$sha}}' \
+            | gh api --method POST "$workflow/dispatches" --input -

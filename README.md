@@ -43,7 +43,7 @@ Schema generation covers objects, arrays, maps, references, scalar literals, nul
 
 ## Install and develop
 
-The CLI is currently available from source and from verified GitHub Actions artifacts. The first public npm release is pending. Follow the [distribution guide](docs/distribution.md) to try the packaged CLI.
+Install `@pixel-brewery/quivra` from GitHub Packages, download a verified GitHub Actions artifact, or build the CLI from source. The [distribution guide](docs/distribution.md) covers each option.
 
 - [Distribution](docs/distribution.md) covers GitHub release binaries, npm installation and the typed Node API.
 - [CI, releases and dependency updates](docs/ci-cd.md) covers checks, Dependabot and release preparation.

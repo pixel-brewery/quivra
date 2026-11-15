@@ -6,7 +6,7 @@
   "scripts": {
     "check:types": "tsc --project tsconfig.json",
     "check:examples": "tsc --project examples/tsconfig.json",
-    "test:automation": "node --test .github/scripts/mergeDependabotPullRequest.test.ts"
+    "test:automation": "node --test .github/scripts/mergeDependabotPullRequest.test.ts distribution/release-candidate.test.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
