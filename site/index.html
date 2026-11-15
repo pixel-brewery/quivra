@@ -5,25 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Generate TypeScript clients from OpenAPI with project-owned MiniJinja templates.">
     <meta name="color-scheme" content="light">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
     <title>Quivra | OpenAPI client generation</title>
+    <link rel="icon" type="image/png" href="assets/quivra-icon.png">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <div class="page">
       <header class="site-header">
-        <a class="brand" href="./">Quivra</a>
+        <a class="brand" href="./">
+          <img src="assets/quivra-icon.png" alt="" width="48" height="48">
+          <span>Quivra</span>
+        </a>
         <a class="source-link" href="https://github.com/pixel-brewery/quivra">View on GitHub <span aria-hidden="true">↗</span></a>
       </header>
       <main id="main">
         <section class="hero" aria-labelledby="title">
-          <h1 id="title">OpenAPI clients shaped by your templates</h1>
-          <p class="lead">Quivra reads your OpenAPI document and generates TypeScript. Your MiniJinja profile controls the client, its dependencies and the files written to your project.</p>
-          <div class="actions">
-            <a class="button primary" href="https://github.com/pixel-brewery/quivra/releases/latest">Download Quivra</a>
-            <a class="button" href="https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md">Read the profile guide</a>
+          <div class="hero-copy">
+            <h1 id="title">OpenAPI clients shaped by your templates</h1>
+            <p class="lead">Quivra generates TypeScript from your OpenAPI document. Your MiniJinja profile controls the client, its dependencies and where the files go.</p>
+            <div class="actions">
+              <a class="button primary" href="https://github.com/pixel-brewery/quivra/releases/latest">Download Quivra</a>
+              <a class="button" href="https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md">Read the profile guide</a>
+            </div>
           </div>
+          <img class="hero-art" src="assets/hero.webp" alt="" width="1820" height="700" fetchpriority="high">
         </section>
         <section class="section" aria-labelledby="get-started">
           <h2 id="get-started">Generate a client</h2>
