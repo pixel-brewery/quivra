@@ -12,6 +12,7 @@ repository = "https://github.com/pixel-brewery/quivra"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 minijinja = { version = "2", features = ["fuel", "json", "loader"] }
+schemars = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml_ng = "0.10"

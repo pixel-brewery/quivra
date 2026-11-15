@@ -10,6 +10,11 @@ const spec = resolve(repo, "examples/openapi.yaml");
 const profile = resolve(repo, "examples/profiles/fetch");
 const out = resolve("generated path with spaces");
 
+for (const file of ["profile.schema.json", "batch.schema.json"]) {
+    const installed = new URL(import.meta.resolve(`@pixel-brewery/quivra/schemas/${file}`));
+    assert.deepEqual(await readFile(installed), await readFile(resolve(repo, "schemas", file)));
+}
+
 const context = await inspect({ spec, profile });
 assert.equal(context.api.title, "Widget API");
 await generate({ spec, profile, out });
