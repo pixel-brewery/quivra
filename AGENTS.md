@@ -20,4 +20,10 @@ Quivra is a Rust CLI from Pixel Brewery that generates TypeScript clients from O
 
 - Run `cargo fmt --all --check`, `cargo clippy --locked --all-targets -- -D warnings` and `cargo test --locked` for relevant Rust changes. For generation changes, regenerate both examples, run `generate --check`, and run the TypeScript compiler and Node smoke test documented in the repository.
 - Keep project-provided templates and generated clients reproducible. Update the generated examples and their manifests through Quivra.
-- Develop in the designated checkout. Preserve unrelated work and the owner's repository and branch policies. Do not publish npm packages, create a release or a release tag, or change repository visibility without explicit authorization. Build-only package verification is allowed for distribution changes.
+- Develop in the designated checkout. Preserve unrelated work and the owner's repository and branch policies. Build-only package verification is allowed for distribution changes.
+
+## Release authority
+
+- The maintained release workflow is authorized to publish automatically from protected `main` in the canonical public `pixel-brewery/quivra` repository. This covers the verified version commit and tag, the seven npm packages on GitHub Packages, and the matching GitHub Release with native archives.
+- The release App is scoped to the atomic push of the verified version commit and tag. The workflow uses `GITHUB_TOKEN` for package publication and GitHub Release operations. Published package versions and release assets are immutable.
+- Manual release dispatch, publication outside the maintained workflow, manual tags or releases, and visibility changes require explicit owner authorization.

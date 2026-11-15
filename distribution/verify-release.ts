@@ -380,6 +380,17 @@ interface IPublishOptions {
     pause?: (milliseconds: number) => Promise<unknown>;
 }
 
+async function checkPublishedVersions(packages: readonly IPackageArtifact[], token: string, fetchMetadata = fetch) {
+    const published = await Promise.all(packages.map(async (entry) => (await readRegistryVersion(entry, token, fetchMetadata))?.integrity ?? null));
+    for (const [index, entry] of packages.entries()) {
+        if (published[index] !== null) {
+            assert.equal(published[index], entry.integrity,
+                `${entry.name}@${entry.version} already exists with different tarball bytes.`);
+        }
+    }
+    return published;
+}
+
 export async function publishCheckedPackages(packages: readonly IPackageArtifact[], {
     token,
     publish,
@@ -388,13 +399,7 @@ export async function publishCheckedPackages(packages: readonly IPackageArtifact
 }: IPublishOptions): Promise<void> {
     assert.equal(typeof publish, "function", "A publication callback is required.");
     // Check the entire release first so a collision in a later package prevents earlier writes.
-    const published = await Promise.all(packages.map(async (entry) => (await readRegistryVersion(entry, token, fetchMetadata))?.integrity ?? null));
-    for (const [index, entry] of packages.entries()) {
-        if (published[index] !== null) {
-            assert.equal(published[index], entry.integrity,
-                `${entry.name}@${entry.version} already exists with different tarball bytes.`);
-        }
-    }
+    const published = await checkPublishedVersions(packages, token, fetchMetadata);
 
     for (const [index, entry] of packages.entries()) {
         const label = `${entry.name}@${entry.version}`;
@@ -421,7 +426,7 @@ function requireReleaseWorkflow(): string {
     const token = process.env.NODE_AUTH_TOKEN;
     assert(
         process.env.GITHUB_ACTIONS === "true"
-            && process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
+            && (process.env.GITHUB_EVENT_NAME === "push" || process.env.GITHUB_EVENT_NAME === "workflow_dispatch")
             && process.env.GITHUB_REPOSITORY === canonicalRepository
             && process.env.GITHUB_REPOSITORY_ID === String(repositoryId)
             && process.env.GITHUB_REF === "refs/heads/main"
@@ -434,12 +439,15 @@ function requireReleaseWorkflow(): string {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     const [version, directory, mode, ...extra] = process.argv.slice(2);
-    if (!version || !directory || (mode !== undefined && mode !== "--publish-npm" && mode !== "--verify-public") || extra.length > 0) {
-        throw new Error("Usage: node distribution/verify-release.ts VERSION ARTIFACTS [--publish-npm | --verify-public]");
+    if (!version || !directory || (mode !== undefined && mode !== "--preflight-npm" && mode !== "--publish-npm" && mode !== "--verify-public") || extra.length > 0) {
+        throw new Error("Usage: node distribution/verify-release.ts VERSION ARTIFACTS [--preflight-npm | --publish-npm | --verify-public]");
     }
     const token = mode === "--publish-npm" ? requireReleaseWorkflow() : process.env.NODE_AUTH_TOKEN;
     const packages = await verifyArtifactSet(version, resolve(directory));
-    if (mode === "--publish-npm") {
+    if (mode === "--preflight-npm") {
+        assert(token, "An existing GitHub Packages read token is required in NODE_AUTH_TOKEN.");
+        await checkPublishedVersions(packages, token);
+    } else if (mode === "--publish-npm") {
         assert(token);
         await publishCheckedPackages(packages, {
             token,

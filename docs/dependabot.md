@@ -8,4 +8,4 @@ For the canonical public repository, a maintainer can set the Actions repository
 
 The workflow considers one same-repository Dependabot pull request after CI succeeds. It checks the successful run attempt, all three platform jobs, `Quality Gate`, and the current head, base and merge candidate. It squash-merges the verified head through GitHub's normal branch checks. Ambiguous or stale metadata leaves the pull request open for another CI run or manual review. Required reviews and other active branch rules still apply.
 
-Quivra's release workflow remains separately dispatched. A dependency merge does not request a release.
+After a successful dependency merge, a separate job requests publication for that exact `main` commit. Retry a failed release from its original run to reuse the verified artifacts.
