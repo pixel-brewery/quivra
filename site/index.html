@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Generate TypeScript clients from OpenAPI with project-owned MiniJinja templates.">
+    <meta name="color-scheme" content="light">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'">
+    <title>Quivra | OpenAPI client generation</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="page">
+      <header class="site-header">
+        <a class="brand" href="./">Quivra</a>
+        <a class="source-link" href="https://github.com/pixel-brewery/quivra">View on GitHub <span aria-hidden="true">↗</span></a>
+      </header>
+      <main id="main">
+        <section class="hero" aria-labelledby="title">
+          <h1 id="title">OpenAPI clients shaped by your templates</h1>
+          <p class="lead">Quivra reads your OpenAPI document and generates TypeScript. Your MiniJinja profile controls the client, its dependencies and the files written to your project.</p>
+          <div class="actions">
+            <a class="button primary" href="https://github.com/pixel-brewery/quivra/releases/latest">Download Quivra</a>
+            <a class="button" href="https://github.com/pixel-brewery/quivra/blob/main/docs/profiles.md">Read the profile guide</a>
+          </div>
+        </section>
+        <section class="section" aria-labelledby="get-started">
+          <h2 id="get-started">Generate a client</h2>
+          <p>Download a native binary for macOS, Windows or Linux, or install <code>@pixel-brewery/quivra</code> from GitHub Packages.</p>
+          <pre tabindex="0"><code>quivra init --preset fetch --out profiles/fetch
+quivra generate openapi.yaml --profile profiles/fetch --out src/api
+quivra generate openapi.yaml --profile profiles/fetch --out src/api --check</code></pre>
+          <a href="https://github.com/pixel-brewery/quivra/blob/main/docs/distribution.md">Installation and Node API</a>
+        </section>
+        <section class="section" aria-labelledby="profiles">
+          <h2 id="profiles">Start with a profile</h2>
+          <div class="cards">
+            <article class="card">
+              <h3>Fetch</h3>
+              <p>Generate standalone TypeScript functions that use Fetch for HTTP requests and server-sent events.</p>
+              <a href="https://github.com/pixel-brewery/quivra/tree/main/examples/generated/fetch">View the Fetch example</a>
+            </article>
+            <article class="card">
+              <h3>Transport</h3>
+              <p>Generate a client class and route table for a transport supplied by your application.</p>
+              <a href="https://github.com/pixel-brewery/quivra/tree/main/examples/generated/transport">View the transport example</a>
+            </article>
+          </div>
+        </section>
+        <section class="section" aria-labelledby="schemas">
+          <h2 id="schemas">Validate your configuration</h2>
+          <p>Quivra ships JSON Schemas for profiles and batch manifests. Use the schemas from your installed version for editor validation.</p>
+          <div class="actions">
+            <a class="button" href="schemas/profile.schema.json">Profile schema</a>
+            <a class="button" href="schemas/batch.schema.json">Batch schema</a>
+          </div>
+        </section>
+      </main>
+      <footer class="site-footer">
+        <a href="https://github.com/pixel-brewery">Pixel Brewery</a>
+        <a href="https://github.com/pixel-brewery/quivra/blob/main/LICENSE">MIT License</a>
+      </footer>
+    </div>
+  </body>
+</html>
