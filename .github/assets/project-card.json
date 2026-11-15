@@ -13,7 +13,7 @@
     "format": "webp",
     "width": 960,
     "height": 540,
-    "alt": "Quivra wordmark beside glass specification plates connected through a plum bracket to ceramic code tiles."
+    "alt": "Quivra wordmark beside a folded ivory ceramic ribbon with lilac edging."
   },
   "icon": {
     "file": "quivra-icon.png",
@@ -26,7 +26,7 @@
     "kind": "illustration",
     "generator": "Built-in ImageGen",
     "generatedOn": "2026-11-15",
-    "prompt": "Use case: ads-marketing. Create a polished 16:9 portfolio cover for Quivra, a Pixel Brewery CLI turning OpenAPI specs and templates into typed clients. Match the supplied Cursor and Archipel cards' warm white seamless studio, generous 7% safe margins, soft shadows, premium on-axis wordmark and tactile ceramic/glass look. Left third: a simple dark aubergine brand symbol above the large black exact word “Quivra” (Q-u-i-v-r-a). The mark is an angular Q formed by a thick rounded-square open loop with an attached short diagonal tail at lower right, and small violet square in the negative-space center. Right two thirds: an elegant asymmetric still life of two upright translucent glass specification plates with simple embossed diagrams, transitioning through a plum ceramic bracket into three neatly aligned ivory output tiles with a few raised graphite code-like lines; one muted lavender accent. The artwork conveys one source shaped into typed client modules. Preserve the scene’s calm editorial clarity and avoid copying the reference products’ shapes. No text except the exact wordmark, no UI screenshot, no tagline, no watermark. Art must reach all edges with a seamless near-white background.",
+    "prompt": "Use case: precise-object-edit. Edit the full-width Quivra project cover in the attached local source. Keep exactly the word “Quivra” (same glyphs, black color, size, baseline, scale and position), the aubergine Q logo with lavender square above it (same exact geometry and position), the surrounding clean left-third negative space, warm white background and 16:9 canvas. Completely replace the crowded illustration at right. New art: a single continuous, broad ribbon of matte ivory ceramic, poised as three shallow accordion folds, with one restrained aubergine face and a lilac edge. Sculptural folded paper rendered as porcelain, elegant clean planes, subtly asymmetric, collected against soft grounded studio shadow. Three folds are one coherent object; no other objects. The whole sculpture occupies the right half, with breathing space around it. Preserve the white editorial palette. Do not draw the old panels, cloud, bracket, cables, protocol diagrams, code keycaps, arrows, extra lettering or wordmark. Think minimal design studio still life, elegantly reduced, no overt UI symbolism.",
     "iconPrompt": "Use case: logo. A finished flat square product icon for Quivra on a true transparent background. A simple dark aubergine (#452a64) angular Q formed by one thick rounded-square open loop with an attached short diagonal tail at lower right, and one small lavender (#9b77d0) square centered in the negative space. The distinctive outline must read as a Q at 24px. Center the symbol with even generous transparent margins and precise, smooth edges. Just the mark, no wordmark, gradients, framing tile, textures, shadow, watermark, or lettering besides the symbol. Match the restraint of contemporary Pixel Brewery developer-tool app marks."
   }
 }

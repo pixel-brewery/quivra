@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/project-card.webp" alt="Quivra wordmark beside glass specification plates connected through a plum bracket to ceramic code tiles" width="960" />
+  <img src=".github/assets/project-card.webp" alt="Quivra wordmark beside a folded ivory ceramic ribbon with lilac edging" width="960" />
 </p>
 
 # Quivra
