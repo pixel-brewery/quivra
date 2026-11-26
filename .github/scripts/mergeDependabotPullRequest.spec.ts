@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { createNativeCiFixture } from "./fixtures/createNativeCiFixture.ts";
 import { mergeDependabotPullRequest } from "./mergeDependabotPullRequest.ts";
 // #endregion
 
@@ -58,6 +59,7 @@ const rule = {
 const rulesPath = "rules/branches/main?per_page=100";
 const main = { name: "main", protected: true, commit: { sha: base.sha } };
 const data: Record<string, unknown> = {
+    ...createNativeCiFixture().values,
     [`repositories/${repoId}`]: {
         ...repo, default_branch: "main", private: false, visibility: "public", fork: false, allow_squash_merge: true,
     },
@@ -66,10 +68,9 @@ const data: Record<string, unknown> = {
     "actions/runs/7/attempts/2/jobs?per_page=100": jobs,
     [`actions/workflows/ci.yml/runs?head_sha=${head.sha}&per_page=100`]: { total_count: 1, workflow_runs: [run] },
     [`compare/${base.sha}...${head.sha}`]: { behind_by: 0, merge_base_commit: { sha: base.sha } },
-    [`commits/${head.sha}/pulls?per_page=100`]: [{ ...association, state: "open", draft: false, merged_at: null, user: bot }],
     "pulls/42": pullRequest,
     [rulesPath]: [rule],
-    [`git/commits/${candidate}`]: { sha: candidate, parents: [{ sha: base.sha }, { sha: head.sha }] },
+    [`git/commits/${candidate}`]: { sha: candidate, tree: { sha: "e".repeat(40) }, parents: [{ sha: base.sha }, { sha: head.sha }] },
     "branches/main": main,
 };
 
@@ -128,7 +129,8 @@ test("skips when protection is unavailable or the gate belongs to another app", 
 
 test("skips a merge if main has changed before the write", async () => {
     // Arrange
-    const { request, writes } = mock({ "branches/main": () => ({ ...main, commit: { sha: "f".repeat(40) } }) });
+    let reads = 0;
+    const { request, writes } = mock({ "branches/main": () => ++reads === 1 ? main : ({ ...main, commit: { sha: "f".repeat(40) } }) });
     // Act
     const result = await mergeDependabotPullRequest(event, request);
     // Assert
@@ -136,8 +138,51 @@ test("skips a merge if main has changed before the write", async () => {
     assert.deepEqual(writes, []);
 });
 
+test("a newer diagnostic dispatch cannot shadow successful native PR proof", async () => {
+    // Arrange
+    const diagnostic = { ...run, id: 9, event: "workflow_dispatch", actor: { id: 41898282, login: "github-actions[bot]", type: "Bot" } };
+    const { request, writes } = mock({ [`actions/workflows/ci.yml/runs?head_sha=${head.sha}&per_page=100`]: () => ({ total_count: 2, workflow_runs: [run, diagnostic] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.equal(result.status, "merged");
+    assert.equal(writes.length, 1);
+});
+
 const actions = { id: 41898282, login: "github-actions[bot]", type: "Bot" };
 const inventoryPath = `actions/workflows/ci.yml/runs?head_sha=${head.sha}&per_page=100`;
+
+for (const changed of [{ number: 43 }, { base: { ...base, ref: "release" } }, { base: { ...base, sha: "f".repeat(40) } }]) test(`a newer unrelated native CI cannot starve the actual main PR: ${JSON.stringify(changed)}`, async () => {
+    // Arrange
+    const unrelated = { ...run, id: 9, pull_requests: [{ ...association, ...changed }] };
+    const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 2, workflow_runs: [run, unrelated] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.equal(result.status, "merged");
+    assert.equal(writes.length, 1);
+});
+
+test("fresh successful native attempt2 wins over a cached same-id approval-pending attempt1 inventory", async () => {
+    // Arrange
+    const cached = { ...run, run_attempt: 1, conclusion: "action_required" };
+    const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 1, workflow_runs: [cached] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.equal(result.status, "merged");
+    assert.equal(writes.length, 1);
+});
+
+test("a known higher inventory attempt cannot be overridden by an older run GET", async () => {
+    // Arrange
+    const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 1, workflow_runs: [{ ...run, run_attempt: 3, conclusion: "failure" }] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.deepEqual(result, { status: "skipped", reason: "superseded-verification" });
+    assert.deepEqual(writes, []);
+});
 
 function dispatchProof(overrides: Record<string, () => unknown> = {}) {
     const dispatched = { ...run, event: "workflow_dispatch", actor: actions, pull_requests: [] };
@@ -148,37 +193,37 @@ function dispatchProof(overrides: Record<string, () => unknown> = {}) {
     }) };
 }
 
-test("accepts trusted dispatch proof through a unique live simple PR association", async () => {
+test("diagnostic head dispatch cannot substitute for native branch-rule proof", async () => {
     // Arrange
     const { dispatched, request, writes } = dispatchProof();
     // Act
     const result = await mergeDependabotPullRequest({ ...event, workflow_run: dispatched }, request);
     // Assert
-    assert.equal(result.status, "merged");
-    assert.equal(writes.length, 1);
+    assert.deepEqual(result, { status: "skipped", reason: "ineligible-workflow-run" });
+    assert.deepEqual(writes, []);
 });
 
-test("a later approval-only PR attempt cannot shadow a successful exact-head dispatch", async () => {
+test("an approval-only PR attempt cannot upgrade diagnostic dispatch into native proof", async () => {
     // Arrange
     const dispatched = { ...run, event: "workflow_dispatch", actor: actions, pull_requests: [] };
     const { request, writes } = dispatchProof({ [inventoryPath]: () => ({ total_count: 2, workflow_runs: [dispatched, { ...run, id: 9, conclusion: "action_required" }] }) });
     // Act
     const result = await mergeDependabotPullRequest({ ...event, workflow_run: dispatched }, request);
     // Assert
-    assert.equal(result.status, "merged");
-    assert.equal(writes.length, 1);
+    assert.deepEqual(result, { status: "skipped", reason: "ineligible-workflow-run" });
+    assert.deepEqual(writes, []);
 });
 
 for (const [name, changed] of [
-    ["untrusted actor identifier", { actor: { ...actions, id: 1 } }],
-    ["human dispatch", { actor: { id: 1, login: "maintainer", type: "User" } }],
+    ["untrusted actor identifier", { actor: { ...bot, id: 1 } }],
+    ["invalid human CI identity", { actor: { id: 0, login: "maintainer", type: "User" } }],
     ["fork source", { head_repository: { ...repo, id: 1 } }],
     ["different workflow", { workflow_id: 99 }],
     ["changed run attempt", { run_attempt: 3 }],
 ] as const) test(`rejects ${name} without a merge write`, async () => {
     // Arrange
-    const dispatched = { ...run, event: "workflow_dispatch", actor: actions, pull_requests: [], ...changed };
-    const { request, writes } = mock({ "actions/runs/7": () => dispatched });
+    const altered = { ...run, ...changed };
+    const { request, writes } = mock({ "actions/runs/7": () => altered });
     // Act
     const result = await mergeDependabotPullRequest(event, request);
     // Assert
@@ -186,20 +231,29 @@ for (const [name, changed] of [
     assert.deepEqual(writes, []);
 });
 
-test("rejects ambiguous dispatch associations including two same-head bot pull requests", async () => {
+for (const actor of [{ id: 1, login: "maintainer", type: "User" }, actions]) test(`merges actual native CI from ${actor.login} only after the full unchanged proof`, async () => {
     // Arrange
-    const { dispatched, request, writes } = dispatchProof({ [`commits/${head.sha}/pulls?per_page=100`]: () => [
-        { ...association, state: "open", draft: false, merged_at: null, user: bot },
-        { ...association, number: 43, state: "open", draft: false, merged_at: null, user: bot },
-    ] });
+    const native = { ...run, actor };
+    const { request, writes } = mock({ "actions/runs/7": () => native, [inventoryPath]: () => ({ total_count: 1, workflow_runs: [native] }) });
     // Act
-    const result = await mergeDependabotPullRequest({ ...event, workflow_run: dispatched }, request);
+    const result = await mergeDependabotPullRequest({ ...event, workflow_run: native }, request);
+    // Assert
+    assert.equal(result.status, "merged");
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0]?.body, { sha: head.sha, merge_method: "squash" });
+});
+
+test("rejects ambiguous native associations including two same-head pull requests", async () => {
+    // Arrange
+    const { request, writes } = mock({ "actions/runs/7": () => ({ ...run, pull_requests: [association, { ...association, number: 43 }] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
     // Assert
     assert.equal(result.status, "skipped");
     assert.deepEqual(writes, []);
 });
 
-for (const conclusion of ["failure", null]) test(`a later ordinary CI attempt with ${conclusion} withholds the merge`, async () => {
+for (const conclusion of ["failure", "action_required", null]) test(`a later ordinary CI attempt with ${conclusion} withholds the merge`, async () => {
     // Arrange
     const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 2, workflow_runs: [run, { ...run, id: 9, conclusion, status: conclusion === null ? "in_progress" : "completed" }] }) });
     // Act
@@ -209,7 +263,7 @@ for (const conclusion of ["failure", null]) test(`a later ordinary CI attempt wi
     assert.deepEqual(writes, []);
 });
 
-test("requires the verified head itself to contain current main for dispatch and PR proof", async () => {
+test("requires the verified head itself to contain current main for native PR proof", async () => {
     // Arrange
     const { request, writes } = mock({ [`compare/${base.sha}...${head.sha}`]: () => ({ behind_by: 1, merge_base_commit: { sha: "f".repeat(40) } }) });
     // Act
