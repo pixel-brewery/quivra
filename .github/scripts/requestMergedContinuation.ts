@@ -25,11 +25,21 @@ export async function requestMergedContinuation(sourceSha: string, request: IReq
         throw new Error("Unsupported continuation repository.");
     const protection = await verifyDependabotProtection(request);
     if (protection) throw new Error(protection);
+    const commit = fields(await request("GET", `${policy.repositoryPath}/commits/${sourceSha}?per_page=100`));
+    const files = commit["files"];
+    if (commit["sha"] !== sourceSha || !Array.isArray(files) || files.length >= 100 || !files.every((value: unknown) => typeof fields(value)["filename"] === "string"))
+        throw new Error("Invalid complete continuation source-file inventory.");
+    const pagesChanged = files.some((value: unknown) => {
+        const file = fields(value);
+        return [file["filename"], file["previous_filename"]].some((path) => typeof path === "string" &&
+            (path.startsWith("site/") || [".github/workflows/publish-pages.yml", ".github/assets/quivra-icon.png", "schemas/profile.schema.json", "schemas/batch.schema.json"].includes(path)));
+    });
     const requested: string[] = [];
     const existing: string[] = [];
     for (const definition of [
         { file: "ci.yml", name: "CI", input: "expected_head_sha" },
         { file: "release.yml", name: "Release Quivra", input: "source_sha" },
+        ...(pagesChanged ? [{ file: "publish-pages.yml", name: "Publish GitHub Pages", input: "expected_head_sha" }] : []),
     ]) {
         const main = fields(await request("GET", `${policy.repositoryPath}/branches/main`));
         if (main["name"] !== "main" || main["protected"] !== true) throw new Error("Continuation requires protected main.");

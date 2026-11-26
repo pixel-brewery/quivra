@@ -28,4 +28,6 @@ Forks, drafts, ambiguous associations, missing/skipped jobs, changed attempts, s
 
 A successful native-token merge does not itself start push-triggered workflows. The continuation therefore requests the existing main CI with `expected_head_sha` and the existing release workflow with `source_sha`. Both inputs identify the exact confirmed merge, and the source must still be current protected `main` immediately before dispatch. A newer main supersedes the request.
 
+The same continuation requests the existing Pages workflow only if the confirmed merge changed one of its original push paths: its workflow, product icon, site files or public configuration schemas. Pages also checks `expected_head_sha` before staging or deployment. A dependency update outside these paths requests no Pages deployment.
+
 Existing successful, failed, cancelled or pending runs for that exact source are retained rather than dispatched twice. Retry a failed original run to reuse its verified source and artifacts. Publication remains inside the maintained release workflow, including its source checks, platform verification, existing scoped release App, atomic version commit/tag, immutable packages and GitHub Release. The controller issues no manual publication or arbitrary-ref release command.
