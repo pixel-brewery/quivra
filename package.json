@@ -6,7 +6,7 @@
   "scripts": {
     "check:types": "tsc --project tsconfig.json",
     "check:examples": "tsc --project examples/tsconfig.json",
-    "test:automation": "node --test .github/scripts/mergeDependabotPullRequest.spec.ts .github/scripts/reconcileDependabotBranches.spec.ts .github/scripts/requestMergedContinuation.spec.ts .github/scripts/requestGitHub.spec.ts distribution/release-candidate.test.ts"
+    "test:automation": "node --test .github/scripts/mergeDependabotPullRequest.spec.ts .github/scripts/reconcileDependabotBranches.spec.ts .github/scripts/runDependabotAutomation.spec.ts .github/scripts/approveReadonlyDependabotCi.spec.ts .github/scripts/normalizeWorkflowActionPins.spec.ts .github/scripts/readReadonlyCiSource.spec.ts .github/scripts/readNativeCiProof.spec.ts .github/scripts/isNativeCiProofCurrent.spec.ts .github/scripts/isNativeCiActor.spec.ts .github/scripts/readMergedDependabotSource.spec.ts .github/scripts/requestMergedContinuation.spec.ts .github/scripts/requestGitHub.spec.ts distribution/release-candidate.test.ts"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

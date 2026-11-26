@@ -5,8 +5,11 @@ import type { IRequestGitHub } from "./interfaces/IRequestGitHub.ts";
 import { isCanonicalRepository } from "./isCanonicalRepository.ts";
 import { isDependabotUser } from "./isDependabotUser.ts";
 import { isGitHubActionsUser } from "./isGitHubActionsUser.ts";
+import { isNativeCiProofCurrent } from "./isNativeCiProofCurrent.ts";
+import { mergeDependabotPullRequest } from "./mergeDependabotPullRequest.ts";
 import { quivraDependabotPolicy as policy } from "./quivraDependabotPolicy.ts";
 import { readLatestDependabotRun } from "./readLatestDependabotRun.ts";
+import { readNativeCiProof } from "./readNativeCiProof.ts";
 import { verifyDependabotProtection } from "./verifyDependabotProtection.ts";
 // #endregion
 
@@ -15,10 +18,12 @@ const branchPattern = /^dependabot\/[a-zA-Z0-9_./-]+$/u;
 const fields = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 /**
- * Refreshes stale bot branches and requests full read-only CI at their exact new heads.
+ * Refreshes bot branches and resumes the native merger after successful regular PR CI.
  * @remarks Uses the same bounded refresh/dispatch contract as the shared repository
  * automation. Quivra's separate native merger retains all four jobs and synthetic
- * merge-parent proof. One conflicted PR cannot starve the remaining candidates.
+ * merge-parent proof. A transient skipped merge can be retried by a later reconcile
+ * without rerunning successful CI. Diagnostic dispatch alone never grants this
+ * resumption. One conflicted PR cannot starve the remaining candidates.
  * @param request - Native-token metadata boundary from the trusted default branch.
  * @param wait - Optional bounded polling delay for deterministic offline checks.
  * @returns One explicit outcome per eligible dependency pull request, at most thirty.
@@ -80,13 +85,27 @@ async function reconcilePull(number: number, workflowId: number, request: IReque
     const headSha = String(head["sha"]);
     const headBranch = String(head["ref"]);
     const inventory = await request("GET", `${policy.repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${headSha}&per_page=100`);
-    const latest = readLatestDependabotRun(inventory, workflowId, headSha, headBranch);
-    if (latest && ((latest["event"] === "workflow_dispatch" && isGitHubActionsUser(latest["actor"])) ||
-        (latest["event"] === "pull_request" && isDependabotUser(latest["actor"]))))
+    const native = readLatestDependabotRun(inventory, workflowId, headSha, headBranch);
+    if (native?.["event"] === "pull_request" &&
+        native["status"] === "completed" && native["conclusion"] === "success") {
+        const result = await mergeDependabotPullRequest({
+            action: "completed",
+            repository: { id: policy.repositoryId, full_name: policy.repositoryName },
+            workflow_run: native,
+        }, request);
+        return result.status === "merged"
+            ? { number, status: "merged", sha: result.sha, head: headSha }
+            : { number, status: "skipped", reason: result.reason };
+    }
+    const latest = readLatestDependabotRun(inventory, workflowId, headSha, headBranch, true);
+    if (native || (latest?.["event"] === "workflow_dispatch" && isGitHubActionsUser(latest["actor"])))
         return { number, status: "waiting", reason: "verification-already-requested" };
     const current = fields(await request("GET", path));
     if (!eligible(current, number) || fields(current["head"])["sha"] !== headSha || fields(current["head"])["ref"] !== headBranch)
         return { number, status: "skipped", reason: "pull-request-changed" };
+    const proof = await readNativeCiProof(current, request);
+    if (!proof || !(await isNativeCiProofCurrent(proof, request)))
+        return { number, status: "skipped", reason: "unverified-readonly-native-source" };
     await request("POST", `${policy.repositoryPath}/actions/workflows/ci.yml/dispatches`, { ref: headBranch, inputs: { expected_head_sha: headSha } });
     return { number, status: "verification-requested", head: headSha };
 }

@@ -1,5 +1,5 @@
 /**
- * Reports one dependency branch's metadata reconciliation without merging it.
+ * Reports one dependency branch's refresh, verification or fully protected merge.
  *
  * @public
  */
@@ -10,18 +10,24 @@ export interface IReconcileResult {
      */
     readonly number: number;
     /**
-     * Current refresh or verification outcome.
+     * Current refresh, verification or protected-merge outcome.
      * @public
      */
-    readonly status: "skipped" | "waiting" | "blocked" | "verification-requested";
+    readonly status: "skipped" | "waiting" | "blocked" | "verification-requested" | "merged";
     /**
      * Diagnostic for a deferred, invalid or conflicted candidate.
      * @public
      */
     readonly reason?: string;
     /**
-     * Exact head explicitly requested for a new read-only CI run.
+     * Exact head requested for verification or confirmed by the native merge proof.
      * @public
      */
     readonly head?: string;
+    /**
+     * Exact protected merge confirmed by the native merger, for source continuation.
+     *
+     * @public
+     */
+    readonly sha?: string;
 }
