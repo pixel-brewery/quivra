@@ -1,46 +1,19 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+// #region Imports
+import type { IConfirmedMerge } from "./interfaces/IConfirmedMerge.ts";
+import type { IPullRequestAssociation } from "./interfaces/IPullRequestAssociation.ts";
+import type { IRequestGitHub } from "./interfaces/IRequestGitHub.ts";
+import type { ISkippedMerge } from "./interfaces/ISkippedMerge.ts";
+import type { IWorkflowTrigger } from "./interfaces/IWorkflowTrigger.ts";
+import { isCanonicalRepository as canonicalRepository } from "./isCanonicalRepository.ts";
+import { isDependabotUser as dependabot } from "./isDependabotUser.ts";
+import { isGitHubActionsUser } from "./isGitHubActionsUser.ts";
+import { quivraDependabotPolicy } from "./quivraDependabotPolicy.ts";
+import { readLatestDependabotRun } from "./readLatestDependabotRun.ts";
+import { verifyDependabotProtection } from "./verifyDependabotProtection.ts";
+// #endregion
 
-const repositoryId = 1457527723;
-const repositoryName = "pixel-brewery/quivra";
-const repositoryPath = `repos/${repositoryName}`;
-const defaultBranch = "main";
-const dependabotId = 49699333;
-const actionsAppId = 15368;
-const workflowPath = ".github/workflows/ci.yml";
-const workflowName = "CI";
-const qualityGate = "Quality Gate";
-const requiredJobs = ["Verify (ubuntu-24.04)", "Verify (macos-15)", "Verify (windows-2025)", qualityGate];
+const { repositoryId, repositoryName, repositoryPath, defaultBranch, workflowPath, workflowName, requiredJobs } = quivraDependabotPolicy;
 const shaPattern = /^[0-9a-f]{40}$/u;
-
-type ApiMethod = "GET" | "PUT";
-type RequestGitHub = (method: ApiMethod, endpoint: string, body?: object) => Promise<unknown>;
-
-interface IWorkflowTrigger {
-    id: number;
-    attempt: number;
-    headSha: string;
-    headBranch: string;
-}
-
-interface IPullRequestAssociation {
-    number: number;
-    headSha: string;
-    headBranch: string;
-    baseSha: string;
-}
-
-interface ISkippedMerge {
-    status: "skipped";
-    reason: string;
-}
-
-interface IConfirmedMerge {
-    status: "merged";
-    pullRequest: number;
-    sha: string;
-}
 
 function fields(value: unknown): Record<string, unknown> {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
@@ -61,19 +34,20 @@ function validSha(value: unknown): value is string {
     return typeof value === "string" && shaPattern.test(value);
 }
 
-function canonicalRepository(value: unknown): boolean {
-    const repository = fields(value);
-    return repository["id"] === repositoryId && repository["full_name"] === repositoryName;
-}
-
-function dependabot(value: unknown): boolean {
-    const user = fields(value);
-    return user["id"] === dependabotId && user["login"] === "dependabot[bot]" && user["type"] === "Bot";
-}
-
+/**
+ * Merges only the latest complete exact-head proof against protected current main.
+ * @remarks Preserves all platform jobs, actor identities, rerun attempts and synthetic
+ * merge-parent verification. Explicit dispatch additionally resolves a unique actual
+ * same-repository bot pull request; it is never trusted from event claims alone.
+ * @param payload - Completed CI workflow event supplied by the trusted bootstrap.
+ * @param request - Authenticated metadata boundary that executes no PR code.
+ * @returns A confirmed protected squash merge or its unsatisfied prerequisite.
+ * @throws An error for a failed request or unconfirmed atomic merge.
+ * @public
+ */
 export async function mergeDependabotPullRequest(
     payload: unknown,
-    request: RequestGitHub,
+    request: IRequestGitHub,
 ): Promise<IConfirmedMerge | ISkippedMerge> {
     const event = fields(payload);
     const trigger = readTrigger(event["workflow_run"]);
@@ -99,7 +73,7 @@ export async function mergeDependabotPullRequest(
     if (!eligibleRun(run, trigger, workflow["id"])) {
         return skipped("ineligible-workflow-run");
     }
-    const association = readAssociation(run["pull_requests"], trigger);
+    const association = await resolveAssociation(run, trigger, request);
     if (!association) {
         return skipped("ineligible-pull-request-association");
     }
@@ -110,12 +84,20 @@ export async function mergeDependabotPullRequest(
         return skipped("ineligible-pull-request");
     }
 
+    const inventory = await request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`);
+    const latest = readLatestDependabotRun(inventory, workflow["id"], trigger.headSha, trigger.headBranch);
+    if (latest?.["id"] !== trigger.id || latest["run_attempt"] !== trigger.attempt || latest["status"] !== "completed" || latest["conclusion"] !== "success")
+        return skipped("superseded-verification");
+    const comparison = fields(await request("GET", `${repositoryPath}/compare/${association.baseSha}...${association.headSha}`));
+    if (comparison["behind_by"] !== 0 || fields(comparison["merge_base_commit"])["sha"] !== association.baseSha)
+        return skipped("stale-head");
+
     const jobs = await request("GET", `${runPath}/attempts/${trigger.attempt}/jobs?per_page=100`);
     if (!successfulJobs(jobs, trigger)) {
         return skipped("incomplete-verification");
     }
 
-    const protection = await verifyProtection(request);
+    const protection = await verifyDependabotProtection(request);
     if (protection) {
         return skipped(protection);
     }
@@ -136,9 +118,11 @@ export async function mergeDependabotPullRequest(
         request("GET", `${repositoryPath}/branches/${defaultBranch}`),
     ]);
     const currentRun = fields(runResponse);
-    const currentAssociation = readAssociation(currentRun["pull_requests"], trigger);
+    const currentAssociation = await resolveAssociation(currentRun, trigger, request);
+    const currentLatest = readLatestDependabotRun(await request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`), workflow["id"], trigger.headSha, trigger.headBranch);
     const main = fields(mainResponse);
     if (!eligibleRun(currentRun, trigger, workflow["id"]) ||
+        currentLatest?.["id"] !== trigger.id || currentLatest["run_attempt"] !== trigger.attempt || currentLatest["status"] !== "completed" || currentLatest["conclusion"] !== "success" ||
         readMergeSha(currentPullRequest, association) !== mergeSha ||
         currentAssociation?.number !== association.number ||
         currentAssociation.baseSha !== association.baseSha ||
@@ -153,6 +137,13 @@ export async function mergeDependabotPullRequest(
     if (merged["merged"] !== true || !validSha(merged["sha"])) {
         throw new Error("GitHub did not confirm the merge. Inspect the pull request before retrying.");
     }
+    const confirmed = fields(await request("GET", pullRequestPath));
+    const confirmedHead = fields(confirmed["head"]);
+    const confirmedBase = fields(confirmed["base"]);
+    if (confirmed["number"] !== association.number || confirmed["state"] !== "closed" || confirmed["merged"] !== true || confirmed["merge_commit_sha"] !== merged["sha"] ||
+        !dependabot(confirmed["user"]) || confirmedHead["sha"] !== association.headSha || confirmedHead["ref"] !== association.headBranch ||
+        !canonicalRepository(confirmedHead["repo"]) || !canonicalRepository(confirmedBase["repo"]) || confirmedBase["ref"] !== defaultBranch)
+        throw new Error("GitHub merge confirmation changed. Inspect the pull request before retrying.");
     return { status: "merged", pullRequest: association.number, sha: merged["sha"] };
 }
 
@@ -169,9 +160,10 @@ function eligibleRun(run: Record<string, unknown>, trigger: IWorkflowTrigger, wo
     return run["id"] === trigger.id && run["run_attempt"] === trigger.attempt &&
         run["workflow_id"] === workflowId && run["name"] === workflowName &&
         (run["path"] === workflowPath || run["path"] === `${workflowPath}@refs/heads/${trigger.headBranch}`) &&
-        run["event"] === "pull_request" && run["status"] === "completed" && run["conclusion"] === "success" &&
+        (run["event"] === "pull_request" ? dependabot(run["actor"]) : run["event"] === "workflow_dispatch" && isGitHubActionsUser(run["actor"])) &&
+        run["status"] === "completed" && run["conclusion"] === "success" &&
         canonicalRepository(run["repository"]) && canonicalRepository(run["head_repository"]) &&
-        dependabot(run["actor"]) && run["head_sha"] === trigger.headSha && run["head_branch"] === trigger.headBranch;
+        run["head_sha"] === trigger.headSha && run["head_branch"] === trigger.headBranch;
 }
 
 function readAssociation(value: unknown, trigger: IWorkflowTrigger): IPullRequestAssociation | undefined {
@@ -214,7 +206,7 @@ function successfulJobs(value: unknown, trigger: IWorkflowTrigger): boolean {
         response["jobs"].length !== requiredJobs.length) {
         return false;
     }
-    const pending = new Set(requiredJobs);
+    const pending = new Set<string>(requiredJobs);
     const ids = new Set<number>();
     for (const value of response["jobs"]) {
         const job = fields(value);
@@ -228,76 +220,18 @@ function successfulJobs(value: unknown, trigger: IWorkflowTrigger): boolean {
     return pending.size === 0;
 }
 
-async function verifyProtection(request: RequestGitHub): Promise<string | undefined> {
-    try {
-        const rules = await request("GET", `${repositoryPath}/rules/branches/${defaultBranch}?per_page=100`);
-        if (!Array.isArray(rules)) {
-            return "invalid-main-protection";
-        }
-        if (!rules.some(isStrictQualityGateRule)) {
-            return "missing-strict-quality-gate";
-        }
-        // GitHub omits bypass actors for read-only callers. The maintainer
-        // configures the ruleset without bypass actors before opting in.
-        // Check the active rule and submit the exact head to the normal merge API.
-        return undefined;
-    } catch (error) {
-        const status = fields(error)["status"];
-        if (status === 403 || status === 404) {
-            return "main-protection-unavailable";
-        }
-        throw error;
-    }
-}
-
-function isStrictQualityGateRule(value: unknown): boolean {
-    const rule = fields(value);
-    const parameters = fields(rule["parameters"]);
-    const checks = parameters["required_status_checks"];
-    return rule["type"] === "required_status_checks" && rule["ruleset_source_type"] === "Repository" &&
-        rule["ruleset_source"] === repositoryName && validId(rule["ruleset_id"]) &&
-        parameters["strict_required_status_checks_policy"] === true &&
-        Array.isArray(checks) && checks.some((value: unknown) => {
-            const check = fields(value);
-            return check["context"] === qualityGate && check["integration_id"] === actionsAppId;
-        });
-}
-
-async function requestGitHub(method: ApiMethod, endpoint: string, body?: object): Promise<unknown> {
-    const response = await fetch(`https://api.github.com/${endpoint}`, {
-        method,
-        redirect: "error",
-        signal: AbortSignal.timeout(15_000),
-        headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${process.env["GH_TOKEN"]}`,
-            "Content-Type": "application/json",
-            "X-GitHub-Api-Version": "2026-03-10",
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+async function resolveAssociation(run: Record<string, unknown>, trigger: IWorkflowTrigger, request: IRequestGitHub): Promise<IPullRequestAssociation | undefined> {
+    if (run["event"] === "pull_request") return readAssociation(run["pull_requests"], trigger);
+    const inventory = await request("GET", `${repositoryPath}/commits/${trigger.headSha}/pulls?per_page=100`);
+    if (!Array.isArray(inventory) || inventory.length >= 100) return undefined;
+    const candidates = inventory.filter((value: unknown) => {
+        const pull = fields(value);
+        const head = fields(pull["head"]);
+        const base = fields(pull["base"]);
+        // This endpoint returns simple PR objects without a merged boolean.
+        return pull["state"] === "open" && pull["draft"] === false && pull["merged"] !== true && pull["merged_at"] == null &&
+            dependabot(pull["user"]) && canonicalRepository(head["repo"]) && canonicalRepository(base["repo"]) &&
+            head["sha"] === trigger.headSha && head["ref"] === trigger.headBranch && base["ref"] === defaultBranch;
     });
-    if (!response.ok) {
-        throw Object.assign(
-            new Error(`GitHub API ${method} ${endpoint} failed with HTTP ${response.status}.`),
-            { status: response.status },
-        );
-    }
-    return response.json();
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-    try {
-        const env = process.env;
-        if (env["GITHUB_EVENT_NAME"] !== "workflow_run" || env["GITHUB_REPOSITORY"] !== repositoryName ||
-            env["GITHUB_REPOSITORY_ID"] !== String(repositoryId) ||
-            env["QUIVRA_DEPENDABOT_AUTO_MERGE"] !== "true" || !env["GH_TOKEN"] ||
-            !env["GITHUB_EVENT_PATH"]) {
-            throw new Error("Dependabot merge requires the opted-in workflow_run context.");
-        }
-        const event: unknown = JSON.parse(await readFile(env["GITHUB_EVENT_PATH"], "utf8"));
-        console.log(JSON.stringify(await mergeDependabotPullRequest(event, requestGitHub)));
-    } catch (error) {
-        console.error(error instanceof Error ? error.message : "Dependabot merge failed.");
-        process.exitCode = 1;
-    }
+    return readAssociation(candidates, trigger);
 }

@@ -2,22 +2,63 @@ name: Merge verified Dependabot updates
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, Release Quivra]
     types: [completed]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
 
 permissions: {}
 
 jobs:
-  merge:
+  reconcile:
     if: >-
       ${{ github.repository_id == '1457527723' &&
           github.repository == 'pixel-brewery/quivra' &&
           github.event.repository.private == false &&
           github.event.repository.default_branch == 'main' &&
+          vars.QUIVRA_DEPENDABOT_AUTO_MERGE == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: dependabot-reconcile
+      cancel-in-progress: false
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out trusted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Refresh stale dependency heads and request full read-only CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUIVRA_DEPENDABOT_AUTO_MERGE: ${{ vars.QUIVRA_DEPENDABOT_AUTO_MERGE }}
+          DEPENDABOT_MODE: reconcile
+        run: node .github/scripts/runDependabotAutomation.ts
+
+  merge:
+    needs: reconcile
+    if: >-
+      ${{ always() && github.event_name == 'workflow_run' &&
+          github.repository_id == '1457527723' &&
+          github.repository == 'pixel-brewery/quivra' &&
+          github.event.repository.private == false &&
+          github.event.repository.default_branch == 'main' &&
           vars.QUIVRA_DEPENDABOT_AUTO_MERGE == 'true' &&
-          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.name == 'CI' &&
           github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.actor.id == 49699333 &&
+          startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&
+          ((github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.actor.id == 49699333) ||
+           (github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.actor.id == 41898282)) &&
           github.event.workflow_run.head_repository.id == 1457527723 }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -31,36 +72,25 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      # This privileged job checks out main. It does not load pull request code or artifacts.
       - name: Check out trusted source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: main
           persist-credentials: false
-
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
-
       - name: Squash merge the verified Dependabot head
         id: merge
         env:
           GH_TOKEN: ${{ github.token }}
           QUIVRA_DEPENDABOT_AUTO_MERGE: ${{ vars.QUIVRA_DEPENDABOT_AUTO_MERGE }}
-        run: |
-          set -euo pipefail
-          result=$(node .github/scripts/mergeDependabotPullRequest.ts)
-          printf '%s\n' "$result"
-          sha=$(jq -er '
-            if .status == "skipped" then ""
-            elif .status == "merged" and (.sha | test("^[0-9a-f]{40}$")) then .sha
-            else error("Unexpected Dependabot merge result") end
-          ' <<< "$result")
-          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          DEPENDABOT_MODE: merge
+        run: node .github/scripts/runDependabotAutomation.ts
 
-  request-release:
+  request-continuation:
     needs: merge
     if: needs.merge.outputs.merge_sha != ''
     runs-on: ubuntu-24.04
@@ -72,24 +102,20 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Request a release for the verified merge
+      - name: Check out trusted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Continue exact-source CI and the existing release workflow
         env:
           GH_TOKEN: ${{ github.token }}
+          QUIVRA_DEPENDABOT_AUTO_MERGE: ${{ vars.QUIVRA_DEPENDABOT_AUTO_MERGE }}
           SOURCE_SHA: ${{ needs.merge.outputs.merge_sha }}
-        run: |
-          set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          main=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
-          if [ "$main" != "$SOURCE_SHA" ]; then
-            echo 'A newer main commit supersedes this release request.'
-            exit 0
-          fi
-          workflow="repos/$GITHUB_REPOSITORY/actions/workflows/release.yml"
-          existing=$(gh api --method GET "$workflow/runs" -f branch=main -f head_sha="$SOURCE_SHA" \
-            --jq 'first(.workflow_runs[] | select(.display_title | startswith("Publish Quivra")) | .html_url) // ""')
-          if [ -n "$existing" ]; then
-            printf 'Release already requested. Retry the original run if it failed: %s\n' "$existing"
-            exit 0
-          fi
-          jq -n --arg sha "$SOURCE_SHA" '{ref:"main",inputs:{source_sha:$sha}}' \
-            | gh api --method POST "$workflow/dispatches" --input -
+          DEPENDABOT_MODE: continue
+        run: node .github/scripts/runDependabotAutomation.ts

@@ -5,8 +5,9 @@ The canonical repository is `pixel-brewery/quivra` with GitHub repository ID `14
 ## Verification
 
 The [CI workflow](../.github/workflows/ci.yml) runs on pull requests, merge queues and
-pushes to `main`. It checks the pinned Architect skill, runs Rust format and lint
-checks and exercises the CLI on Linux, macOS and Windows. It checks the committed
+pushes to `main`. Trusted dependency automation can also request the same complete,
+read-only CI through an exact-source dispatch. It checks the pinned Architect skill,
+runs Rust format and lint checks and exercises the CLI on Linux, macOS and Windows. It checks the committed
 generated outputs with TypeScript 7 and runs both clients against fake transports.
 The stable **Quality Gate** check requires every platform job to pass.
 
@@ -18,9 +19,11 @@ The npm wrapper’s platform packages are generated at the release version. See 
 ## Publish from protected `main`
 
 Each source push to protected `main` starts **Release Quivra** with a patch increment.
-The guarded Dependabot merge workflow dispatches it with the exact merge commit after
-its own merges. The release workflow updates `Cargo.toml` and `Cargo.lock`, creates a
-version commit with `[skip ci]`, and bundles that commit for verification. CI tests the
+The guarded Dependabot merge workflow continues both main CI and this existing release
+workflow with the exact merge commit after its own merges. It retains any existing run
+for that source instead of dispatching a duplicate. The release workflow updates
+`Cargo.toml` and `Cargo.lock`, creates a version commit with `[skip ci]`, and bundles
+that commit for verification. CI tests the
 bundled source with the new version. The packaging matrix installs and tests each platform
 package, and the workflow verifies the archive manifests and binary checksums from that run.
 
