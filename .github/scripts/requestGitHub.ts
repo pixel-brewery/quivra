@@ -8,6 +8,9 @@ import type { ApiMethod } from "./types/ApiMethod.ts";
  * @param endpoint - Relative GitHub REST endpoint.
  * @param body - Optional JSON request body.
  * @returns Parsed JSON or undefined for a successful empty dispatch/update response.
+ * @remarks The controller pins the supported 2022-11-28 PR response contract,
+ * including its synthetic/confirmed merge SHA. Changing this API version requires
+ * an explicit response-contract migration; guard fields must remain available.
  * @throws An error with method, endpoint and HTTP status, without response payloads.
  * @public
  */
@@ -16,7 +19,7 @@ export async function requestGitHub(method: ApiMethod, endpoint: string, body?: 
         method, redirect: "error", signal: AbortSignal.timeout(15_000),
         headers: {
             Accept: "application/vnd.github+json", Authorization: `Bearer ${process.env["GH_TOKEN"]}`,
-            "Content-Type": "application/json", "X-GitHub-Api-Version": "2026-03-10",
+            "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28",
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
