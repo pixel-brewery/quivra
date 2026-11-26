@@ -6,9 +6,11 @@ import type { ISkippedMerge } from "./interfaces/ISkippedMerge.ts";
 import type { IWorkflowTrigger } from "./interfaces/IWorkflowTrigger.ts";
 import { isCanonicalRepository as canonicalRepository } from "./isCanonicalRepository.ts";
 import { isDependabotUser as dependabot } from "./isDependabotUser.ts";
-import { isGitHubActionsUser } from "./isGitHubActionsUser.ts";
+import { isNativeCiActor } from "./isNativeCiActor.ts";
+import { isNativeCiProofCurrent } from "./isNativeCiProofCurrent.ts";
 import { quivraDependabotPolicy } from "./quivraDependabotPolicy.ts";
 import { readLatestDependabotRun } from "./readLatestDependabotRun.ts";
+import { readNativeCiProof } from "./readNativeCiProof.ts";
 import { verifyDependabotProtection } from "./verifyDependabotProtection.ts";
 // #endregion
 
@@ -37,8 +39,8 @@ function validSha(value: unknown): value is string {
 /**
  * Merges only the latest complete exact-head proof against protected current main.
  * @remarks Preserves all platform jobs, actor identities, rerun attempts and synthetic
- * merge-parent verification. Explicit dispatch additionally resolves a unique actual
- * same-repository bot pull request; it is never trusted from event claims alone.
+ * merge-parent verification. Only actual regular PR CI supplies native branch
+ * proof; a head-only diagnostic workflow dispatch never substitutes for that proof.
  * @param payload - Completed CI workflow event supplied by the trusted bootstrap.
  * @param request - Authenticated metadata boundary that executes no PR code.
  * @returns A confirmed protected squash merge or its unsatisfied prerequisite.
@@ -73,20 +75,25 @@ export async function mergeDependabotPullRequest(
     if (!eligibleRun(run, trigger, workflow["id"])) {
         return skipped("ineligible-workflow-run");
     }
-    const association = await resolveAssociation(run, trigger, request);
+    const association = readAssociation(run["pull_requests"], trigger);
     if (!association) {
         return skipped("ineligible-pull-request-association");
     }
 
     const pullRequestPath = `${repositoryPath}/pulls/${association.number}`;
-    const mergeSha = readMergeSha(await request("GET", pullRequestPath), association);
+    const pullRequest = await request("GET", pullRequestPath);
+    const mergeSha = readMergeSha(pullRequest, association);
     if (!mergeSha) {
         return skipped("ineligible-pull-request");
     }
 
     const inventory = await request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`);
-    const latest = readLatestDependabotRun(inventory, workflow["id"], trigger.headSha, trigger.headBranch);
-    if (latest?.["id"] !== trigger.id || latest["run_attempt"] !== trigger.attempt || latest["status"] !== "completed" || latest["conclusion"] !== "success")
+    const latest = readLatestDependabotRun(inventory, workflow["id"], association);
+    if (latest?.["id"] !== trigger.id) return skipped("superseded-verification");
+    const latestRun = fields(await request("GET", runPath));
+    const latestAssociation = readAssociation(latestRun["pull_requests"], trigger);
+    if (!eligibleRun(latestRun, trigger, workflow["id"]) || latestAssociation?.number !== association.number || latestAssociation.baseSha !== association.baseSha ||
+        (typeof latest["run_attempt"] === "number" && latest["run_attempt"] > trigger.attempt))
         return skipped("superseded-verification");
     const comparison = fields(await request("GET", `${repositoryPath}/compare/${association.baseSha}...${association.headSha}`));
     if (comparison["behind_by"] !== 0 || fields(comparison["merge_base_commit"])["sha"] !== association.baseSha)
@@ -108,21 +115,25 @@ export async function mergeDependabotPullRequest(
         fields(merge["parents"][1])["sha"] !== association.headSha) {
         return skipped("unverified-merge-commit");
     }
+    const sourceProof = await readNativeCiProof(pullRequest, request);
+    if (!sourceProof || sourceProof.baseSha !== association.baseSha || sourceProof.headSha !== association.headSha || sourceProof.mergeSha !== mergeSha)
+        return skipped("unverified-native-source");
 
     // GitHub's merge endpoint checks the expected head atomically. Re-read the
     // merge candidate and base immediately before it. Strict branch rules also
     // prevent a changed main from merging without fresh verification.
-    const [runResponse, currentPullRequest, mainResponse] = await Promise.all([
-        request("GET", runPath),
+    const [currentPullRequest, mainResponse, currentInventory] = await Promise.all([
         request("GET", pullRequestPath),
         request("GET", `${repositoryPath}/branches/${defaultBranch}`),
+        request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`),
     ]);
-    const currentRun = fields(runResponse);
-    const currentAssociation = await resolveAssociation(currentRun, trigger, request);
-    const currentLatest = readLatestDependabotRun(await request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`), workflow["id"], trigger.headSha, trigger.headBranch);
+    const currentLatest = readLatestDependabotRun(currentInventory, workflow["id"], association);
+    if (currentLatest?.["id"] !== trigger.id) return skipped("verification-changed");
+    const currentRun = fields(await request("GET", runPath));
+    const currentAssociation = readAssociation(currentRun["pull_requests"], trigger);
     const main = fields(mainResponse);
     if (!eligibleRun(currentRun, trigger, workflow["id"]) ||
-        currentLatest?.["id"] !== trigger.id || currentLatest["run_attempt"] !== trigger.attempt || currentLatest["status"] !== "completed" || currentLatest["conclusion"] !== "success" ||
+        (typeof currentLatest["run_attempt"] === "number" && currentLatest["run_attempt"] > trigger.attempt) ||
         readMergeSha(currentPullRequest, association) !== mergeSha ||
         currentAssociation?.number !== association.number ||
         currentAssociation.baseSha !== association.baseSha ||
@@ -130,6 +141,7 @@ export async function mergeDependabotPullRequest(
         return skipped("verification-changed");
     }
 
+    if (!(await isNativeCiProofCurrent(sourceProof, request))) return skipped("verification-changed");
     const merged = fields(await request("PUT", `${pullRequestPath}/merge`, {
         sha: association.headSha,
         merge_method: "squash",
@@ -160,7 +172,7 @@ function eligibleRun(run: Record<string, unknown>, trigger: IWorkflowTrigger, wo
     return run["id"] === trigger.id && run["run_attempt"] === trigger.attempt &&
         run["workflow_id"] === workflowId && run["name"] === workflowName &&
         (run["path"] === workflowPath || run["path"] === `${workflowPath}@refs/heads/${trigger.headBranch}`) &&
-        (run["event"] === "pull_request" ? dependabot(run["actor"]) : run["event"] === "workflow_dispatch" && isGitHubActionsUser(run["actor"])) &&
+        run["event"] === "pull_request" && isNativeCiActor(run["actor"]) &&
         run["status"] === "completed" && run["conclusion"] === "success" &&
         canonicalRepository(run["repository"]) && canonicalRepository(run["head_repository"]) &&
         run["head_sha"] === trigger.headSha && run["head_branch"] === trigger.headBranch;
@@ -218,20 +230,4 @@ function successfulJobs(value: unknown, trigger: IWorkflowTrigger): boolean {
         ids.add(job["id"]);
     }
     return pending.size === 0;
-}
-
-async function resolveAssociation(run: Record<string, unknown>, trigger: IWorkflowTrigger, request: IRequestGitHub): Promise<IPullRequestAssociation | undefined> {
-    if (run["event"] === "pull_request") return readAssociation(run["pull_requests"], trigger);
-    const inventory = await request("GET", `${repositoryPath}/commits/${trigger.headSha}/pulls?per_page=100`);
-    if (!Array.isArray(inventory) || inventory.length >= 100) return undefined;
-    const candidates = inventory.filter((value: unknown) => {
-        const pull = fields(value);
-        const head = fields(pull["head"]);
-        const base = fields(pull["base"]);
-        // This endpoint returns simple PR objects without a merged boolean.
-        return pull["state"] === "open" && pull["draft"] === false && pull["merged"] !== true && pull["merged_at"] == null &&
-            dependabot(pull["user"]) && canonicalRepository(head["repo"]) && canonicalRepository(base["repo"]) &&
-            head["sha"] === trigger.headSha && head["ref"] === trigger.headBranch && base["ref"] === defaultBranch;
-    });
-    return readAssociation(candidates, trigger);
 }
