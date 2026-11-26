@@ -30,6 +30,19 @@ test("fresh current-attempt metadata wins over a stale list and newer diagnostic
     assert.equal(f.writes.length, 1);
 });
 
+test("a newer CI for the same branch against another PR/base cannot shadow main's original native approval", async () => {
+    // Arrange
+    const f = createNativeCiFixture();
+    const unrelated = { ...f.run, id: 9, pull_requests: [{ ...f.run.pull_requests[0], number: 43, base: { ...f.pull.base, ref: "release" } }] };
+    f.values[`actions/workflows/ci.yml/runs?head_sha=${f.proof.headSha}&per_page=100`] = { total_count: 2, workflow_runs: [f.run, unrelated] };
+    // Act
+    const result = await approveReadonlyDependabotCi(f.request);
+    // Assert
+    assert.equal(result[0]?.runId, 7);
+    assert.equal(result[0]?.status, "approved");
+    assert.equal(f.writes.length, 1);
+});
+
 for (const changed of [
     { status: "queued", conclusion: null },
     { status: "in_progress", conclusion: null },

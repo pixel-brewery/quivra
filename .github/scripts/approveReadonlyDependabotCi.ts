@@ -59,7 +59,7 @@ export async function approveReadonlyDependabotCi(request: IRequestGitHub): Prom
 
 async function latestNative(proof: INativeCiProof, workflowId: number, request: IRequestGitHub): Promise<Record<string, unknown> | undefined> {
     const inventory = await request("GET", `${policy.repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${proof.headSha}&per_page=100`);
-    const selected = readLatestDependabotRun(inventory, workflowId, proof.headSha, proof.headBranch);
+    const selected = readLatestDependabotRun(inventory, workflowId, proof);
     if (!selected) return undefined;
     const run = fields(await request("GET", `${policy.repositoryPath}/actions/runs/${String(selected["id"])}`));
     if (run["id"] !== selected["id"] || run["workflow_id"] !== workflowId || run["name"] !== policy.workflowName ||

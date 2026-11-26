@@ -24,7 +24,7 @@ If no native attempt exists, an exact-source dispatch of the complete CI workflo
 
 Only the separate merge owner can merge. It requires:
 
-- The latest genuine native PR run and its current attempt at the exact head. A newer diagnostic dispatch cannot shadow it. A later native attempt awaiting approval, still running or failed continues to block merging.
+- The latest genuine native run for this exact PR/current-main association and head. CI for the same branch against another PR/base, and diagnostic dispatches, cannot shadow it. Its current attempt/state comes from a fresh run GET after selecting the eligible identity; an inventory cache retaining an earlier approval-pending attempt cannot hide the approved successful attempt. Evidence of a newer eligible run/attempt, pending or failed native verification, continues to block merging.
 - All three exact platform jobs (`Verify (ubuntu-24.04)`, `Verify (macos-15)`, `Verify (windows-2025)`) and `Quality Gate`, each completed successfully with the matching run, attempt and head.
 - The fixed repository IDs, workflow identity, unique actual Dependabot PR author/association, verified read-only CI source and a genuine native PR run. Its actor can also be GitHub Actions after a guarded branch refresh or a maintainer who fixes that bot branch; the same full source/job/attempt/protection proof applies. Immutable service identities are required specifically for approval, rather than excluding legitimate maintainer-authored successful CI. Head-only dispatch remains diagnostic verification.
 - Current-main ancestry plus the existing synthetic merge candidate with precisely the current base and verified head as its two ordered parents.

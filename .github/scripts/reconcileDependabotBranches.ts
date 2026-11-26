@@ -85,7 +85,12 @@ async function reconcilePull(number: number, workflowId: number, request: IReque
     const headSha = String(head["sha"]);
     const headBranch = String(head["ref"]);
     const inventory = await request("GET", `${policy.repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${headSha}&per_page=100`);
-    const native = readLatestDependabotRun(inventory, workflowId, headSha, headBranch);
+    const association = { number, headSha, headBranch, baseSha: String(fields(pull["base"])["sha"]) };
+    const selected = readLatestDependabotRun(inventory, workflowId, association);
+    const current = selected ? await request("GET", `${policy.repositoryPath}/actions/runs/${String(selected["id"])}`) : undefined;
+    const native = selected ? readLatestDependabotRun({ total_count: 1, workflow_runs: [current] }, workflowId, association) : undefined;
+    if (selected && (!native || native["id"] !== selected["id"] || (typeof selected["run_attempt"] === "number" && Number(native["run_attempt"]) < selected["run_attempt"])))
+        return { number, status: "waiting", reason: "verification-changed" };
     if (native?.["event"] === "pull_request" &&
         native["status"] === "completed" && native["conclusion"] === "success") {
         const result = await mergeDependabotPullRequest({
@@ -97,13 +102,13 @@ async function reconcilePull(number: number, workflowId: number, request: IReque
             ? { number, status: "merged", sha: result.sha, head: headSha }
             : { number, status: "skipped", reason: result.reason };
     }
-    const latest = readLatestDependabotRun(inventory, workflowId, headSha, headBranch, true);
+    const latest = readLatestDependabotRun(inventory, workflowId, association, true);
     if (native || (latest?.["event"] === "workflow_dispatch" && isGitHubActionsUser(latest["actor"])))
         return { number, status: "waiting", reason: "verification-already-requested" };
-    const current = fields(await request("GET", path));
-    if (!eligible(current, number) || fields(current["head"])["sha"] !== headSha || fields(current["head"])["ref"] !== headBranch)
+    const currentPull = fields(await request("GET", path));
+    if (!eligible(currentPull, number) || fields(currentPull["head"])["sha"] !== headSha || fields(currentPull["head"])["ref"] !== headBranch)
         return { number, status: "skipped", reason: "pull-request-changed" };
-    const proof = await readNativeCiProof(current, request);
+    const proof = await readNativeCiProof(currentPull, request);
     if (!proof || !(await isNativeCiProofCurrent(proof, request)))
         return { number, status: "skipped", reason: "unverified-readonly-native-source" };
     await request("POST", `${policy.repositoryPath}/actions/workflows/ci.yml/dispatches`, { ref: headBranch, inputs: { expected_head_sha: headSha } });

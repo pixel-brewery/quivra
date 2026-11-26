@@ -152,6 +152,38 @@ test("a newer diagnostic dispatch cannot shadow successful native PR proof", asy
 const actions = { id: 41898282, login: "github-actions[bot]", type: "Bot" };
 const inventoryPath = `actions/workflows/ci.yml/runs?head_sha=${head.sha}&per_page=100`;
 
+for (const changed of [{ number: 43 }, { base: { ...base, ref: "release" } }, { base: { ...base, sha: "f".repeat(40) } }]) test(`a newer unrelated native CI cannot starve the actual main PR: ${JSON.stringify(changed)}`, async () => {
+    // Arrange
+    const unrelated = { ...run, id: 9, pull_requests: [{ ...association, ...changed }] };
+    const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 2, workflow_runs: [run, unrelated] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.equal(result.status, "merged");
+    assert.equal(writes.length, 1);
+});
+
+test("fresh successful native attempt2 wins over a cached same-id approval-pending attempt1 inventory", async () => {
+    // Arrange
+    const cached = { ...run, run_attempt: 1, conclusion: "action_required" };
+    const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 1, workflow_runs: [cached] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.equal(result.status, "merged");
+    assert.equal(writes.length, 1);
+});
+
+test("a known higher inventory attempt cannot be overridden by an older run GET", async () => {
+    // Arrange
+    const { request, writes } = mock({ [inventoryPath]: () => ({ total_count: 1, workflow_runs: [{ ...run, run_attempt: 3, conclusion: "failure" }] }) });
+    // Act
+    const result = await mergeDependabotPullRequest(event, request);
+    // Assert
+    assert.deepEqual(result, { status: "skipped", reason: "superseded-verification" });
+    assert.deepEqual(writes, []);
+});
+
 function dispatchProof(overrides: Record<string, () => unknown> = {}) {
     const dispatched = { ...run, event: "workflow_dispatch", actor: actions, pull_requests: [] };
     return { dispatched, ...mock({

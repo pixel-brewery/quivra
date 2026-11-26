@@ -88,8 +88,12 @@ export async function mergeDependabotPullRequest(
     }
 
     const inventory = await request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`);
-    const latest = readLatestDependabotRun(inventory, workflow["id"], trigger.headSha, trigger.headBranch);
-    if (latest?.["id"] !== trigger.id || latest["run_attempt"] !== trigger.attempt || latest["status"] !== "completed" || latest["conclusion"] !== "success")
+    const latest = readLatestDependabotRun(inventory, workflow["id"], association);
+    if (latest?.["id"] !== trigger.id) return skipped("superseded-verification");
+    const latestRun = fields(await request("GET", runPath));
+    const latestAssociation = readAssociation(latestRun["pull_requests"], trigger);
+    if (!eligibleRun(latestRun, trigger, workflow["id"]) || latestAssociation?.number !== association.number || latestAssociation.baseSha !== association.baseSha ||
+        (typeof latest["run_attempt"] === "number" && latest["run_attempt"] > trigger.attempt))
         return skipped("superseded-verification");
     const comparison = fields(await request("GET", `${repositoryPath}/compare/${association.baseSha}...${association.headSha}`));
     if (comparison["behind_by"] !== 0 || fields(comparison["merge_base_commit"])["sha"] !== association.baseSha)
@@ -118,17 +122,18 @@ export async function mergeDependabotPullRequest(
     // GitHub's merge endpoint checks the expected head atomically. Re-read the
     // merge candidate and base immediately before it. Strict branch rules also
     // prevent a changed main from merging without fresh verification.
-    const [runResponse, currentPullRequest, mainResponse] = await Promise.all([
-        request("GET", runPath),
+    const [currentPullRequest, mainResponse, currentInventory] = await Promise.all([
         request("GET", pullRequestPath),
         request("GET", `${repositoryPath}/branches/${defaultBranch}`),
+        request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`),
     ]);
-    const currentRun = fields(runResponse);
+    const currentLatest = readLatestDependabotRun(currentInventory, workflow["id"], association);
+    if (currentLatest?.["id"] !== trigger.id) return skipped("verification-changed");
+    const currentRun = fields(await request("GET", runPath));
     const currentAssociation = readAssociation(currentRun["pull_requests"], trigger);
-    const currentLatest = readLatestDependabotRun(await request("GET", `${repositoryPath}/actions/workflows/ci.yml/runs?head_sha=${trigger.headSha}&per_page=100`), workflow["id"], trigger.headSha, trigger.headBranch);
     const main = fields(mainResponse);
     if (!eligibleRun(currentRun, trigger, workflow["id"]) ||
-        currentLatest?.["id"] !== trigger.id || currentLatest["run_attempt"] !== trigger.attempt || currentLatest["status"] !== "completed" || currentLatest["conclusion"] !== "success" ||
+        (typeof currentLatest["run_attempt"] === "number" && currentLatest["run_attempt"] > trigger.attempt) ||
         readMergeSha(currentPullRequest, association) !== mergeSha ||
         currentAssociation?.number !== association.number ||
         currentAssociation.baseSha !== association.baseSha ||

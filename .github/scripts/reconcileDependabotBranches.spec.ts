@@ -16,7 +16,7 @@ const confirmedSha = "f".repeat(40);
 const bot = { id: 49699333, login: "dependabot[bot]", type: "Bot" };
 const actions = { id: 41898282, login: "github-actions[bot]", type: "Bot" };
 
-function fixture(options: { stale?: boolean; runs?: readonly object[]; foreign?: boolean; conflicted?: boolean; changed?: boolean; transientUnknown?: boolean; failedJob?: boolean; wrongMergeParent?: boolean; unsafeSource?: boolean } = {}) {
+function fixture(options: { stale?: boolean; runs?: readonly object[]; currentRun?: Record<string, unknown>; foreign?: boolean; conflicted?: boolean; changed?: boolean; transientUnknown?: boolean; failedJob?: boolean; wrongMergeParent?: boolean; unsafeSource?: boolean } = {}) {
     let refreshed = false;
     let merged = false;
     let reads = 0;
@@ -56,8 +56,12 @@ function fixture(options: { stale?: boolean; runs?: readonly object[]; foreign?:
                 base: { ref: "main", repo, sha: mainSha } };
         }
         if (route === "branches/main") return { name: "main", protected: true, commit: { sha: mainSha } };
-        if (route === "actions/runs/7") return nativeRun();
-        if (route === "actions/runs/7/attempts/1/jobs?per_page=100") return { total_count: 4, jobs: ["Verify (ubuntu-24.04)", "Verify (macos-15)", "Verify (windows-2025)", "Quality Gate"].map((name, index) => ({ id: 70 + index, name, run_id: 7, run_attempt: 1, head_sha: oldHead, status: "completed", conclusion: options.failedJob && index === 3 ? "failure" : "success" })) };
+        if (/^actions\/runs\/\d+$/u.test(route)) {
+            const id = Number(route.split("/").at(-1));
+            const declared = options.runs?.find((run) => ((run as Record<string, unknown>)["id"] ?? 7) === id);
+            return { ...nativeRun(), ...declared, id, ...options.currentRun };
+        }
+        if (/^actions\/runs\/7\/attempts\/\d+\/jobs\?per_page=100$/u.test(route)) return { total_count: 4, jobs: ["Verify (ubuntu-24.04)", "Verify (macos-15)", "Verify (windows-2025)", "Quality Gate"].map((name, index) => ({ id: 70 + index, name, run_id: 7, run_attempt: options.currentRun?.["run_attempt"] ?? 1, head_sha: oldHead, status: "completed", conclusion: options.failedJob && index === 3 ? "failure" : "success" })) };
         if (route === `git/commits/${mergeSha}`) return { sha: mergeSha, tree: { sha: "e".repeat(40) }, parents: [{ sha: options.wrongMergeParent ? freshHead : mainSha }, { sha: refreshed ? freshHead : oldHead }] };
         if (route === `git/commits/${oldHead}` || route === `git/commits/${freshHead}`) return { sha: refreshed ? freshHead : oldHead, tree: { sha: "e".repeat(40) } };
         if (route === `git/ref/heads/${branch}`) return { object: { type: "commit", sha: refreshed ? freshHead : oldHead } };
@@ -111,6 +115,17 @@ test("successful diagnostic dispatch does not replace native PR proof for resump
 test("a newer diagnostic run does not starve a successful native PR resumption", async () => {
     // Arrange
     const f = fixture({ runs: [{ id: 7 }, { id: 9, event: "workflow_dispatch", actor: actions }] });
+    // Act
+    const result = await reconcileDependabotBranches(f.request);
+    // Assert
+    assert.equal(result[0]?.status, "merged");
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0]?.method, "PUT");
+});
+
+test("reconciliation hydrates approved native attempt2 even when the list retains attempt1/action_required", async () => {
+    // Arrange
+    const f = fixture({ runs: [{ run_attempt: 1, conclusion: "action_required" }], currentRun: { run_attempt: 2, conclusion: "success", actor: actions } });
     // Act
     const result = await reconcileDependabotBranches(f.request);
     // Assert
