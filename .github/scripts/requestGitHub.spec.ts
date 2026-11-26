@@ -4,6 +4,20 @@ import { test } from "node:test";
 import { requestGitHub } from "./requestGitHub.ts";
 // #endregion
 
+test("pins the supported PR response contract that retains the required merge SHA", async (context) => {
+    // Arrange
+    const mergeSha = "c".repeat(40);
+    context.mock.method(globalThis, "fetch", async (...args: Parameters<typeof fetch>) => {
+        const version = new Headers(args[1]?.headers).get("X-GitHub-Api-Version");
+        assert.equal(version, "2022-11-28");
+        return Response.json(version === "2022-11-28" ? { merge_commit_sha: mergeSha } : {});
+    });
+    // Act
+    const result = await requestGitHub("GET", "repos/pixel-brewery/quivra/pulls/16");
+    // Assert
+    assert.deepEqual(result, { merge_commit_sha: mergeSha });
+});
+
 test("accepts successful empty dispatch responses without parsing nonexistent JSON", async (context) => {
     // Arrange
     context.mock.method(globalThis, "fetch", async () => new Response(null, { status: 204 }));
