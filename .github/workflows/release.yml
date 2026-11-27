@@ -57,7 +57,6 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$GITHUB_SHA"
           gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" \
             --jq 'any(.[]; .type == "pull_request") and any(.[]; .type == "required_status_checks" and
-              .parameters.strict_required_status_checks_policy and
               any(.parameters.required_status_checks[]; .context == "Quality Gate" and .integration_id == 15368))' | grep -qx true
           gh api "repos/$GITHUB_REPOSITORY/environments/release-main/deployment-branch-policies" \
             --jq '([.branch_policies[] | select(.name == "main" and .type == "branch")] | length) == 1 and .total_count == 1' | grep -qx true

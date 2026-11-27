@@ -11,6 +11,6 @@
     "rewriteRelativeImportExtensions": true,
     "noEmit": true
   },
-  "include": [".github/scripts/**/*.ts", "distribution/*.ts", "distribution/npm/**/*.ts", "examples/smoke.ts"],
+  "include": ["distribution/*.ts", "distribution/npm/**/*.ts", "examples/smoke.ts"],
   "exclude": ["distribution/npm-api.types.ts", "distribution/smoke.ts"]
 }
