@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       expected_head_sha:
-        description: Exact source requested by trusted dependency automation
+        description: Merge commit requested by Dependabot auto-merge
         required: false
         default: ""
         type: string

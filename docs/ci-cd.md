@@ -5,8 +5,9 @@ The canonical repository is `pixel-brewery/quivra` with GitHub repository ID `14
 ## Verification
 
 The [CI workflow](../.github/workflows/ci.yml) runs on pull requests, merge queues and
-pushes to `main`. Trusted dependency automation can also request the same complete,
-read-only CI through an exact-source dispatch. It checks the pinned Architect skill,
+pushes to `main`. After a Dependabot merge,
+[Dependabot auto-merge](../.github/workflows/dependabot-merge.yml) dispatches the same CI
+with the merge commit. It checks the pinned Architect skill,
 runs Rust format and lint checks and exercises the CLI on Linux, macOS and Windows. It checks the committed
 generated outputs with TypeScript 7 and runs both clients against fake transports.
 The stable **Quality Gate** check requires every platform job to pass.
@@ -14,14 +15,13 @@ The stable **Quality Gate** check requires every platform job to pass.
 [Dependabot](../.github/dependabot.yml) checks Cargo and GitHub Actions every Monday.
 GitHub's Dependabot security updates also run when valid advisories are found.
 Dependabot also tracks the TypeScript and Node type dependencies in the root npm lockfile.
-The npm wrapper’s platform packages are generated at the release version. See the [Dependabot guide](dependabot.md) for guarded automatic merges.
+The npm wrapper’s platform packages are generated at the release version. See the [Dependabot guide](dependabot.md) for automatic merges.
 
 ## Publish from protected `main`
 
 Each source push to protected `main` starts **Release Quivra** with a patch increment.
-The guarded Dependabot merge workflow continues both main CI and this existing release
-workflow with the exact merge commit after its own merges. It retains any existing run
-for that source instead of dispatching a duplicate. The release workflow updates
+A Dependabot merge starts no push workflows, so Dependabot auto-merge dispatches main
+CI and this release workflow with the merge commit instead. The release workflow updates
 `Cargo.toml` and `Cargo.lock`, creates a version commit with `[skip ci]`, and bundles
 that commit for verification. CI tests the
 bundled source with the new version. The packaging matrix installs and tests each platform
@@ -36,7 +36,7 @@ and checksums. Re-run failed jobs in the original run to reuse the verified cand
 archives, including after a partial upload.
 
 Keep the canonical repository public. The `main` ruleset requires pull requests and
-strict **Quality Gate** checks and gives only the Pixel Brewery Releases App a bypass
+the **Quality Gate** check and gives only the Pixel Brewery Releases App a bypass
 for the version commit. A separate ruleset protects `main` against deletion and
 non-fast-forward updates for every actor. Restrict the `release-main` environment to
 `main` and allow public GitHub Packages in the organization. [Distribution guide](distribution.md)
